@@ -1,6 +1,6 @@
 0:
   device_params:
-    path: /dev/hidraw6
+    path: /dev/hidraw3
 1:
   device_params:
-    path: /dev/hidraw7
+    path: /dev/hidraw4

@@ -28,7 +28,7 @@ class SpacemouseMobileInputDevice(InputDeviceBase):
 
         import pyspacemouse
 
-        self.spacemouse = pyspacemouse.open(**self.device_params)
+        self.spacemouse = pyspacemouse.open_by_path(**self.device_params)
 
     def read(self):
         if not self.connected:
