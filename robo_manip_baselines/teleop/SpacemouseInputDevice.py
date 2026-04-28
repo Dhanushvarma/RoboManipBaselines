@@ -31,7 +31,8 @@ class SpacemouseInputDevice(InputDeviceBase):
 
         import pyspacemouse
 
-        self.spacemouse = pyspacemouse.open(**self.device_params)
+        # FIXME(dhanush): open_by_path works when SpaceMouseDual passed, otherwise use open
+        self.spacemouse = pyspacemouse.open_by_path(**self.device_params)
 
     def read(self):
         if not self.connected:

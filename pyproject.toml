@@ -22,7 +22,7 @@ dependencies = [
   "pyyaml",
   "tqdm",
   "dataclasses",
-  "numpy",
+  "numpy==1.26.4",
   "h5py",
   "scipy>=1.7.0",
   "matplotlib>=3.3.4",
