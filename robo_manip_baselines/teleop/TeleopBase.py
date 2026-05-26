@@ -592,7 +592,7 @@ class TeleopBase(OperationDataMixin, ABC):
         depth_images = []
         for camera_name in (
             self.env.unwrapped.camera_names
-            + self.env.unwrapped.zedmini_camera_names  # NOTE: CALLM ZED-MINI
+            # + self.env.unwrapped.zedmini_camera_names  # NOTE: CALLM ZED-MINI only for CALLM
             + self.env.unwrapped.rgb_tactile_names
             + self.env.unwrapped.pointcloud_camera_names
         ):

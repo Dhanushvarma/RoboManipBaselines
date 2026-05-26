@@ -429,7 +429,8 @@ class RolloutBase(OperationDataMixin, ABC):
 
     def load_ckpt(self, device="cuda"):
         print(f"[{self.__class__.__name__}] Load {self.args.checkpoint}")
-        self.device = torch.device(device)
+        # self.device = torch.device(device)
+        self.device = torch.device('cpu')
         self.policy.load_state_dict(
             torch.load(
                 self.args.checkpoint, map_location=self.device, weights_only=True
