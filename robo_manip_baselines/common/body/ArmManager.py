@@ -275,10 +275,11 @@ class ArmConfig(BodyConfigBase):
     # Link ID of end-effector in robot model when solving IK by Pinocchio library
     ik_eef_joint_id: int
 
-    # Indices of arm joints at observed joint positions
+    # Indices of arm joints in the per-key joint_pos vector
+    # (used by MotionManager, ArmManager, get_*_from_obs).
     arm_joint_idxes: npt.NDArray[np.int_]
 
-    # Indices of gripper joints at observed joint positions
+    # Indices of gripper joints in the per-key joint_pos vector
     gripper_joint_idxes: npt.NDArray[np.int_]
 
     # Indicies of gripper joints (belonging to this body config) in a vector of gripper joint positions only
@@ -296,6 +297,15 @@ class ArmConfig(BodyConfigBase):
     # [Optional] Indices of gripper joints at joint positions limits (high/low)
     gripper_joint_idxes_for_limit: Optional[npt.NDArray[np.int_]] = None
 
+    # [Optional] Indices of arm joints in the env *action* vector. Defaults to
+    # arm_joint_idxes when the action vector and joint_pos vector coincide
+    # (e.g. single-arm UR5e). Override for compound action vectors such as
+    # mobile-base + arm + gripper.
+    arm_action_idxes: Optional[npt.NDArray[np.int_]] = None
+
+    # [Optional] Indices of gripper joints in the env *action* vector.
+    gripper_action_idxes: Optional[npt.NDArray[np.int_]] = None
+
     # [Optional] Joints to be excluded from the URDF model when building robot model for Pinocchio library
     exclude_joint_names: Optional[List[str]] = None
 
@@ -305,3 +315,7 @@ class ArmConfig(BodyConfigBase):
     def __post_init__(self):
         if self.gripper_joint_idxes_for_limit is None:
             self.gripper_joint_idxes_for_limit = self.gripper_joint_idxes
+        if self.arm_action_idxes is None:
+            self.arm_action_idxes = self.arm_joint_idxes
+        if self.gripper_action_idxes is None:
+            self.gripper_action_idxes = self.gripper_joint_idxes

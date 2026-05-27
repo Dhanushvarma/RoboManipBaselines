@@ -242,9 +242,13 @@ class RealEnvBase(EnvDataMixin, gym.Env, ABC):
         pass
 
     def overwrite_command_for_safety(self, action, duration, joint_vel_limit_scale):
+        # Use arm_action_idxes (which defaults to arm_joint_idxes when the
+        # action vector and joint_pos vector coincide) so this works both for
+        # single-arm envs and for envs whose action vector also includes a
+        # mobile base or other components.
         arm_joint_idxes = np.concatenate(
             [
-                body_config.arm_joint_idxes
+                body_config.arm_action_idxes
                 for body_config in self.body_config_list
                 if isinstance(body_config, ArmConfig)
             ]
