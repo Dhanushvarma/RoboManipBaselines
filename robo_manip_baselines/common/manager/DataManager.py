@@ -11,8 +11,10 @@ from ..data.DataKey import DataKey
 from ..data.RmbData import RmbData
 from ..utils.MathUtils import (
     get_rel_pose_from_se3,
+    get_se2_pose_from_se3,
     get_se3_from_pose,
     get_se3_from_rel_pose,
+    get_se3_from_se2_pose,
 )
 
 
@@ -90,6 +92,16 @@ class DataManager:
                         get_rel_pose_from_se3(prev_se3.actInv(current_se3))
                     )
                 return np.concatenate(rel_pose_list)
+        elif key in (
+            DataKey.MEASURED_MOBILE_OMNI_POS_REL,
+            DataKey.COMMAND_MOBILE_OMNI_POS_REL,
+        ):
+            if len(all_data_seq[abs_key]) < 2:
+                return np.zeros(3)
+            else:
+                current_se3 = get_se3_from_se2_pose(all_data_seq[abs_key][-1])
+                prev_se3 = get_se3_from_se2_pose(all_data_seq[abs_key][-2])
+                return get_se2_pose_from_se3(prev_se3.actInv(current_se3))
         else:
             raise ValueError(
                 f"[{self.__class__.__name__}] Unsupported key for relative data: {key}"
@@ -228,6 +240,14 @@ class DataManager:
             elif key in (DataKey.MEASURED_EEF_POSE_REL, DataKey.COMMAND_EEF_POSE_REL):
                 all_data_seq[key] = [
                     get_rel_pose_from_se3(get_se3_from_rel_pose(data).inverse())
+                    for data in all_data_seq[key]
+                ]
+            elif key in (
+                DataKey.MEASURED_MOBILE_OMNI_POS_REL,
+                DataKey.COMMAND_MOBILE_OMNI_POS_REL,
+            ):
+                all_data_seq[key] = [
+                    get_se2_pose_from_se3(get_se3_from_se2_pose(data).inverse())
                     for data in all_data_seq[key]
                 ]
 

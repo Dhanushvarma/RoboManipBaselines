@@ -46,6 +46,27 @@ def get_se3_from_rel_pose(rel_pose):
     return pin.SE3(pin.rpy.rpyToMatrix(rel_pose[3:6]), rel_pose[0:3])
 
 
+def get_se3_from_se2_pose(se2_pose):
+    """Get pinocchio SE3 from planar pose (x, y, yaw) with yaw in radians.
+
+    The pose is embedded in the z=0 plane with rotation purely about the
+    Z-axis, so that the same SE3 machinery (and conventions) used for the
+    end-effector relative poses also applies to the mobile base.
+    """
+    x, y, yaw = se2_pose
+    return pin.SE3(pin.rpy.rpyToMatrix(0.0, 0.0, float(yaw)), np.array([x, y, 0.0]))
+
+
+def get_se2_pose_from_se3(se3):
+    """Get planar pose (x, y, yaw) with yaw in radians from pinocchio SE3.
+
+    yaw is extracted as the Z-component of the RPY decomposition, which wraps
+    to (-pi, pi]. Inverse of ``get_se3_from_se2_pose`` for planar motion.
+    """
+    yaw = pin.rpy.matrixToRpy(se3.rotation)[2]
+    return np.array([se3.translation[0], se3.translation[1], yaw])
+
+
 def euler_to_rotation_matrix(rpy_deg):
     r, p, y = np.deg2rad(rpy_deg)
     Rx = np.array([[1, 0, 0], [0, np.cos(r), -np.sin(r)], [0, np.sin(r), np.cos(r)]])

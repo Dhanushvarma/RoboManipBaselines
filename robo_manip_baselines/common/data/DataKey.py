@@ -67,6 +67,21 @@ class DataKey:
     # Command velocity of omni-directional mobile base
     COMMAND_MOBILE_OMNI_VEL = "command_mobile_omni_vel"
 
+    # Measured pose of omni-directional mobile base (x, y, yaw) in the odometry
+    # frame [m, m, rad]. The odometry origin is zeroed at each episode reset.
+    MEASURED_MOBILE_OMNI_POS = "measured_mobile_omni_pos"
+    # Command pose of omni-directional mobile base (x, y, yaw) in the odometry
+    # frame [m, m, rad].
+    COMMAND_MOBILE_OMNI_POS = "command_mobile_omni_pos"
+
+    # Measured pose of omni-directional mobile base relative to previous step in
+    # the previous pose frame (dx, dy, dyaw) [m, m, rad]. NOT relative to the
+    # episode origin.
+    MEASURED_MOBILE_OMNI_POS_REL = "measured_mobile_omni_pos_rel"
+    # Command pose of omni-directional mobile base relative to previous step in
+    # the previous pose frame (dx, dy, dyaw) [m, m, rad].
+    COMMAND_MOBILE_OMNI_POS_REL = "command_mobile_omni_pos_rel"
+
     # All keys of measured data
     MEASURED_DATA_KEYS = [
         MEASURED_JOINT_POS,
@@ -80,6 +95,8 @@ class DataKey:
         # MEASURED_EEF_VEL,
         MEASURED_EEF_WRENCH,
         MEASURED_MOBILE_OMNI_VEL,
+        MEASURED_MOBILE_OMNI_POS,
+        MEASURED_MOBILE_OMNI_POS_REL,
     ]
 
     # All keys of command data
@@ -95,6 +112,8 @@ class DataKey:
         # COMMAND_EEF_VEL,
         # COMMAND_EEF_WRENCH,
         COMMAND_MOBILE_OMNI_VEL,
+        COMMAND_MOBILE_OMNI_POS,
+        COMMAND_MOBILE_OMNI_POS_REL,
     ]
 
     @classmethod
@@ -159,7 +178,14 @@ class DataKey:
                 return 7 * num_eef
             else:
                 return 6 * num_eef
-        elif key in (DataKey.MEASURED_MOBILE_OMNI_VEL, DataKey.COMMAND_MOBILE_OMNI_VEL):
+        elif key in (
+            DataKey.MEASURED_MOBILE_OMNI_VEL,
+            DataKey.COMMAND_MOBILE_OMNI_VEL,
+            DataKey.MEASURED_MOBILE_OMNI_POS,
+            DataKey.COMMAND_MOBILE_OMNI_POS,
+            DataKey.MEASURED_MOBILE_OMNI_POS_REL,
+            DataKey.COMMAND_MOBILE_OMNI_POS_REL,
+        ):
             return 3
         else:
             raise ValueError(f"[{cls.__name__}] Invalid data key: {key}")
@@ -206,6 +232,10 @@ class DataKey:
             return DataKey.MEASURED_EEF_POSE_REL
         elif key == DataKey.COMMAND_EEF_POSE:
             return DataKey.COMMAND_EEF_POSE_REL
+        elif key == DataKey.MEASURED_MOBILE_OMNI_POS:
+            return DataKey.MEASURED_MOBILE_OMNI_POS_REL
+        elif key == DataKey.COMMAND_MOBILE_OMNI_POS:
+            return DataKey.COMMAND_MOBILE_OMNI_POS_REL
         else:
             raise ValueError(f"[{cls.__name__}] Relative data key not found: {key}")
 
@@ -224,6 +254,10 @@ class DataKey:
             return DataKey.MEASURED_EEF_POSE
         elif key == DataKey.COMMAND_EEF_POSE_REL:
             return DataKey.COMMAND_EEF_POSE
+        elif key == DataKey.MEASURED_MOBILE_OMNI_POS_REL:
+            return DataKey.MEASURED_MOBILE_OMNI_POS
+        elif key == DataKey.COMMAND_MOBILE_OMNI_POS_REL:
+            return DataKey.COMMAND_MOBILE_OMNI_POS
         else:
             raise ValueError(f"[{cls.__name__}] Absolute data key not found: {key}")
 

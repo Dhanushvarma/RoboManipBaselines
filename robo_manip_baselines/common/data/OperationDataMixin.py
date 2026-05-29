@@ -31,6 +31,8 @@ class OperationDataMixin:
             DataKey.COMMAND_GRIPPER_JOINT_POS_REL,
             DataKey.MEASURED_EEF_POSE_REL,
             DataKey.COMMAND_EEF_POSE_REL,
+            DataKey.MEASURED_MOBILE_OMNI_POS_REL,
+            DataKey.COMMAND_MOBILE_OMNI_POS_REL,
         ):
             abs_key = DataKey.get_abs_key(key)
             if abs_key not in (
