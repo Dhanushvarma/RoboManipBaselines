@@ -44,8 +44,8 @@ class RealSpacemouseMobileInputDevice(InputDeviceBase):
         mobile_action_type="position_relative",
         pos_xy_scale=1e-2,
         pos_theta_scale=2e-2,
-        vel_xy_scale=0.2,
-        vel_theta_scale=0.5,
+        vel_xy_scale=0.75,
+        vel_theta_scale=1.00,
         device_params={},
     ):
         super().__init__()
@@ -87,7 +87,7 @@ class RealSpacemouseMobileInputDevice(InputDeviceBase):
                 [
                     self.vel_xy_scale * raw[0],
                     self.vel_xy_scale * raw[1],
-                    self.vel_theta_scale * raw[2],
+                    -self.vel_theta_scale * raw[2],
                 ]
             )
             self.mobile_manager.set_command_vel(vel)
@@ -98,7 +98,7 @@ class RealSpacemouseMobileInputDevice(InputDeviceBase):
             [
                 self.pos_xy_scale * raw[0],
                 self.pos_xy_scale * raw[1],
-                self.pos_theta_scale * raw[2],
+                -self.pos_theta_scale * raw[2],
             ]
         )
 
