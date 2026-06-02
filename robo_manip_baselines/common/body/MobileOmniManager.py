@@ -10,12 +10,20 @@ from .BodyManagerBase import BodyConfigBase, BodyManagerBase
 class MobileOmniManager(BodyManagerBase):
     """Manager for omni-directional mobile base.
 
-    The base is position-controlled in the SE2 plane. Poses are stored as
-    (x, y, yaw) with yaw in radians, in the odometry frame whose origin is
-    zeroed at each episode reset. Relative commands/poses mirror the
-    end-effector convention in ArmManager: the delta is expressed in the
-    previous pose's frame (``prev^-1 * current``), computed with the same SE3
-    machinery embedded in the z=0 plane (see MathUtils).
+    The base operates in the SE2 plane and exposes three independent command
+    channels, any of which an env may drive (see MobileBaseUtils for the control
+    modes that select between them):
+
+      - velocity (``target_vel``): (vx, vy, vw) [m/s, m/s, rad/s].
+      - absolute pose (``target_pos``): (x, y, yaw[rad]) in the odometry frame,
+        whose origin is zeroed at each episode reset.
+      - relative pose (``target_pos_rel``): (dx, dy, dyaw[rad]) delta.
+
+    The relative pose mirrors the end-effector convention in ArmManager: the
+    delta is expressed in the previous pose's frame (``prev^-1 * current``),
+    computed with the same SE3 machinery embedded in the z=0 plane (MathUtils).
+    Velocity carries no absolute/relative distinction (a rate has no fixed
+    origin); its reference frame is handled at the env/hardware boundary.
     """
 
     SUPPORTED_DATA_KEYS = [

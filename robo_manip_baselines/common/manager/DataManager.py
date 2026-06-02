@@ -31,6 +31,12 @@ class DataManager:
         }
         if self.env is not None:
             self.meta_data["env"] = self.env.spec.name
+            # Let an env contribute static, episode-independent metadata (e.g.
+            # the mobile base control mode and velocity frame). Opt-in: envs
+            # that don't define `extra_meta_data` contribute nothing.
+            self.meta_data.update(
+                getattr(self.env.unwrapped, "extra_meta_data", {}) or {}
+            )
 
         self.episode_idx = 0
         self.world_idx = 0
