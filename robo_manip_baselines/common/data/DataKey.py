@@ -62,6 +62,9 @@ class DataKey:
     # Command end-effector wrench (fx, fy, fz, nx, ny, nz)
     COMMAND_EEF_WRENCH = "command_eef_wrench"
 
+    # Measured position of omni-directional mobile base (x, y, theta)
+    MEASURED_MOBILE_OMNI_POS = "measured_mobile_omni_pos"
+
     # Measured velocity of omni-directional mobile base
     MEASURED_MOBILE_OMNI_VEL = "measured_mobile_omni_vel"
     # Command velocity of omni-directional mobile base
@@ -79,6 +82,7 @@ class DataKey:
         MEASURED_EEF_POSE_REL,
         # MEASURED_EEF_VEL,
         MEASURED_EEF_WRENCH,
+        MEASURED_MOBILE_OMNI_POS,
         MEASURED_MOBILE_OMNI_VEL,
     ]
 
@@ -159,7 +163,11 @@ class DataKey:
                 return 7 * num_eef
             else:
                 return 6 * num_eef
-        elif key in (DataKey.MEASURED_MOBILE_OMNI_VEL, DataKey.COMMAND_MOBILE_OMNI_VEL):
+        elif key in (
+            DataKey.MEASURED_MOBILE_OMNI_POS,
+            DataKey.MEASURED_MOBILE_OMNI_VEL,
+            DataKey.COMMAND_MOBILE_OMNI_VEL,
+        ):
             return 3
         else:
             raise ValueError(f"[{cls.__name__}] Invalid data key: {key}")

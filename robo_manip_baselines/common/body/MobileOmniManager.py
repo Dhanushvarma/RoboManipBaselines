@@ -10,6 +10,7 @@ class MobileOmniManager(BodyManagerBase):
     """Manager for omni-directional mobile base."""
 
     SUPPORTED_DATA_KEYS = [
+        DataKey.MEASURED_MOBILE_OMNI_POS,
         DataKey.MEASURED_MOBILE_OMNI_VEL,
         DataKey.COMMAND_MOBILE_OMNI_VEL,
     ]
