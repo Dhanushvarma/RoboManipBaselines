@@ -177,6 +177,10 @@ class DataKey:
         """Get the policy input/output dimension of the data specified by key."""
         if key in (DataKey.MEASURED_EEF_POSE, DataKey.COMMAND_EEF_POSE):
             return 9 * cls.get_num_eef(env)
+        if key == DataKey.MEASURED_MOBILE_OMNI_POS:
+            # (x, y, theta) stored -> (x, y, cos theta, sin theta) for the policy
+            # (continuous SO(2) heading; removes the +/-pi wraparound).
+            return 4
         return cls.get_dim(key, env)
 
     @classmethod
@@ -310,6 +314,10 @@ class DataKey:
     @classmethod
     def get_plot_scale_for_policy(cls, key, env):
         """Get scale to plot policy representation data."""
-        if key in (DataKey.MEASURED_EEF_POSE, DataKey.COMMAND_EEF_POSE):
+        if key in (
+            DataKey.MEASURED_EEF_POSE,
+            DataKey.COMMAND_EEF_POSE,
+            DataKey.MEASURED_MOBILE_OMNI_POS,
+        ):
             return np.ones(cls.get_dim_for_policy(key, env))
         return cls.get_plot_scale(key, env)

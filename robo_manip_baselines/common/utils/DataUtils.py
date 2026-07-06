@@ -41,10 +41,35 @@ def denormalize_data(data, stats):
         raise ValueError(f"[denormalize_data] Invalid normalization type: {norm_type}")
 
 
+def get_mobile_omni_pos4_from_pos3(data):
+    """Encode planar base pose ``(x, y, theta) -> (x, y, cos theta, sin theta)``.
+
+    Continuous SO(2) representation of the base heading for the policy: it
+    removes the ``+/-pi`` wraparound in ``theta`` (the planar analog of the
+    ortho6d encoding used for the 3D EEF rotation). Operates on the last axis, so
+    it handles both a single pose ``(3,)`` and a sequence ``(T, 3)``.
+    """
+    data = np.asarray(data)
+    theta = data[..., 2]
+    return np.concatenate(
+        [data[..., 0:2], np.cos(theta)[..., None], np.sin(theta)[..., None]],
+        axis=-1,
+    )
+
+
+def get_mobile_omni_pos3_from_pos4(data):
+    """Inverse of :func:`get_mobile_omni_pos4_from_pos3` via ``atan2``."""
+    data = np.asarray(data)
+    theta = np.arctan2(data[..., 3], data[..., 2])
+    return np.concatenate([data[..., 0:2], theta[..., None]], axis=-1)
+
+
 def convert_data_to_policy(data, key):
     """Convert data from RMB/env representation to policy representation."""
     if key in (DataKey.MEASURED_EEF_POSE, DataKey.COMMAND_EEF_POSE):
         return get_pose9_from_pose7(data)
+    if key == DataKey.MEASURED_MOBILE_OMNI_POS:
+        return get_mobile_omni_pos4_from_pos3(data)
     return data
 
 
@@ -52,6 +77,8 @@ def convert_data_from_policy(data, key):
     """Convert data from policy representation to RMB/env representation."""
     if key in (DataKey.MEASURED_EEF_POSE, DataKey.COMMAND_EEF_POSE):
         return get_pose7_from_pose9(data)
+    if key == DataKey.MEASURED_MOBILE_OMNI_POS:
+        return get_mobile_omni_pos3_from_pos4(data)
     return data
 
 
