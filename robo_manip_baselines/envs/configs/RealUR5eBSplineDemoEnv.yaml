@@ -1,0 +1,20 @@
+robot_ip: "192.168.11.4"
+camera_ids:
+  hand: "153122070885"
+
+# B-spline sampling / callm_controller tuning.
+# spline_rate: paper samples the segment at 100 Hz; the servoJ RT loop then
+#   interpolates that up to arm_frequency.
+# arm_lookahead_time: low end of servoJ's permitted [0.03, 0.2]. CallM defaults
+#   to 0.2, which visibly lags a 100 Hz stream (three interpolators stack:
+#   B-spline -> JointTrajectoryInterpolator -> servoJ lookahead).
+# max_joint_speed: JointInterpolationController's own cap [rad/s]. This is the
+#   binding speed limit, not UR5e hardware (~pi rad/s), so raise it here if
+#   speedup saturates.
+spline_rate: 100.0
+arm_frequency: 125
+arm_lookahead_time: 0.03
+arm_gain: 100
+max_joint_speed: 1.05
+gripper_rate: 20.0
+stale_plan_timeout: 1.0

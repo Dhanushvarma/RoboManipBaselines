@@ -10,6 +10,7 @@ class TrainMain:
         "Sarnn",
         "Act",
         "MtAct",
+        "BsplinePolicy",
         "DiffusionPolicy",
         "DiffusionPolicy3d",
         "FlowPolicy",

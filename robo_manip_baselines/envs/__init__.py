@@ -137,6 +137,10 @@ register(
     id="robo_manip_baselines/RealUR5eDemoEnv-v0",
     entry_point="robo_manip_baselines.envs.real.ur5e:RealUR5eDemoEnv",
 )
+register(
+    id="robo_manip_baselines/RealUR5eBSplineDemoEnv-v0",
+    entry_point="robo_manip_baselines.envs.real.ur5e:RealUR5eBSplineDemoEnv",
+)
 
 ## UR5e-Dual
 register(

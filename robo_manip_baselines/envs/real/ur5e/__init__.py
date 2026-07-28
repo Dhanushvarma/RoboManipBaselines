@@ -1,1 +1,2 @@
+from .RealUR5eBSplineDemoEnv import RealUR5eBSplineDemoEnv
 from .RealUR5eDemoEnv import RealUR5eDemoEnv
