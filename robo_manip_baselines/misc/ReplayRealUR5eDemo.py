@@ -8,6 +8,10 @@ import yaml
 
 from robo_manip_baselines.common import DataKey, RmbData, find_rmb_files
 
+# Sibling module, not a package import: misc/ has no __init__.py and these are
+# run as `python ./misc/Foo.py`, which puts misc/ on sys.path[0].
+from ReplayErrorLog import append_row  # noqa: E402
+
 
 def parse_argument():
     parser = argparse.ArgumentParser(
@@ -58,6 +62,13 @@ def parse_argument():
         type=str,
         default=None,
         help="directory to save per-episode .npz logs",
+    )
+    parser.add_argument(
+        "--log",
+        type=str,
+        default=None,
+        help="append error metrics to this CSV (created if absent). Shares the "
+        "schema ReplayBsplineDemo.py writes, so both land on the same plot",
     )
     return parser.parse_args()
 
@@ -165,8 +176,9 @@ class ReplayRealUR5eDemo:
             "wall_duration": time.perf_counter() - start,
             "demo_duration": (time_seq[-1] - time_seq[0]) / self.speedup,
         }
-        self.report(log)
+        metrics = self.report(log)
         self.save_log(filename, log)
+        self.append_error_log(filename, metrics)
         return log
 
     def move_to_start(self, first_command):
@@ -206,18 +218,29 @@ class ReplayRealUR5eDemo:
         # against -- a replay that tracks no worse than the recording did is
         # behaving correctly, however large the absolute number looks.
         rows = [
-            ("recorded demo_command -> recorded_measured", recorded, log["demo_command"]),
-            ("track    commanded -> measured (this run)", measured, commanded),
-            ("repeat   recorded_measured -> this run's", measured, recorded),
+            (
+                "recorded",
+                "recorded demo_command -> recorded_measured",
+                recorded,
+                log["demo_command"],
+            ),
+            ("track", "track    commanded -> measured (this run)", measured, commanded),
+            ("repeat", "repeat   recorded_measured -> this run's", measured, recorded),
         ]
         print(f"[{name}]   tracking (n={n} frames):")
         print(
             f"[{name}]     {'stage':<46} {'joint max':>10} {'joint RMS':>10} "
             f"{'grip max':>9}"
         )
-        for label, a, b in rows:
+        metrics = {"n_frames": n}
+        for key, label, a, b in rows:
             j_max, j_rms = stat(a, b, slice(0, 6), deg)
             g_max, _ = stat(a, b, slice(6, 7))
+            if key in ("recorded", "track"):
+                metrics[f"{key}_joint_max_deg"] = j_max
+                metrics[f"{key}_joint_rms_deg"] = j_rms
+            if key == "track":
+                metrics["track_grip_max_cnt"] = g_max
             print(
                 f"[{name}]     {label:<46} {j_max:9.4f}d {j_rms:9.4f}d {g_max:8.2f}c"
             )
@@ -236,6 +259,27 @@ class ReplayRealUR5eDemo:
             f"[{name}]   timing: {wall:.2f} s wall vs {expected:.2f} s expected "
             f"({100.0 * (wall / expected - 1.0):+.1f}%)"
         )
+        metrics["wall_duration_s"] = wall
+        metrics["expected_duration_s"] = expected
+        return metrics
+
+    def append_error_log(self, filename, metrics):
+        if self.log is None:
+            return
+        row = dict(metrics)
+        # mode names the control stack, so this row plots alongside the
+        # B-spline modes as the ur_rtde baseline. fit/execute stay blank: this
+        # script has no spline, so they are not zero, they are absent.
+        row.update(
+            {
+                "script": self.__class__.__name__,
+                "mode": "ur_rtde_raw",
+                "episode": os.path.splitext(os.path.basename(filename))[0],
+                "speedup": self.speedup,
+            }
+        )
+        append_row(self.log, row)
+        print(f"[{self.__class__.__name__}]   Logged metrics: {self.log}")
 
     def save_log(self, filename, log):
         if self.output_dir is None:

@@ -15,6 +15,10 @@ from robo_manip_baselines.policy.bspline_policy.BSplineAction import (
     whole_episode_params,
 )
 
+# Sibling module, not a package import: misc/ has no __init__.py and these are
+# run as `python ./misc/Foo.py`, which puts misc/ on sys.path[0].
+from ReplayErrorLog import append_row  # noqa: E402
+
 
 def parse_argument():
     parser = argparse.ArgumentParser(
@@ -68,6 +72,14 @@ def parse_argument():
         type=str,
         default=None,
         help="directory to save per-episode .npz replay logs",
+    )
+    parser.add_argument(
+        "--log",
+        type=str,
+        default=None,
+        help="append error metrics to this CSV (created if absent). Runs at "
+        "different --speedup accumulate into one file; plot it with "
+        "PlotReplayErrors.py",
     )
 
     # ---- fit parameters: defaults MUST match training ----
@@ -233,8 +245,9 @@ class ReplayBsplineDemo:
                 ),
             }
         )
-        self.report(log)
+        metrics = self.report(log)
         self.save_log(filename, log)
+        self.append_error_log(filename, metrics)
         return log
 
     def reconstruct(self, params, fitter, n_frames):
@@ -456,21 +469,31 @@ class ReplayBsplineDemo:
         # is measured against the demo, not against "fitted", so it nests: it is
         # fit error plus whatever chunk stitching and the clamp add on top.
         rows = [
-            ("fit      demo -> fitted   (representation)", fitted, demo_for_fit),
-            ("execute  demo -> commanded (+ stitching, clamp)", commanded, demo),
-            ("track    commanded -> measured (controller)", measured, commanded),
+            ("fit", "fit      demo -> fitted   (representation)", fitted, demo_for_fit),
+            (
+                "execute",
+                "execute  demo -> commanded (+ stitching, clamp)",
+                commanded,
+                demo,
+            ),
+            ("track", "track    commanded -> measured (controller)", measured, commanded),
         ]
         print(f"[{name}]   error decomposition (n={n} frames):")
         print(
             f"[{name}]     {'stage':<48} {'joint max':>10} {'joint RMS':>10} "
             f"{'grip max':>9}"
         )
-        for label, a, b in rows:
+        metrics = {"n_frames": n}
+        for key, label, a, b in rows:
             j_max, j_rms = stat(a, b, slice(0, 6), rad2deg)
             g_max, _ = stat(a, b, slice(6, 7))
+            metrics[f"{key}_joint_max_deg"] = j_max
+            metrics[f"{key}_joint_rms_deg"] = j_rms
+            metrics[f"{key}_grip_max_cnt"] = g_max
             print(
                 f"[{name}]     {label:<48} {j_max:9.4f}d {j_rms:9.4f}d {g_max:8.2f}c"
             )
+        metrics["anchor_lead_max"] = int(lead.max())
 
         if lead.max() > 0:
             print(
@@ -493,6 +516,33 @@ class ReplayBsplineDemo:
                 f"[{name}]   NOTE: dry run -- 'track' is meaningless (the stub "
                 f"echoes commands back). Only 'fit' and 'execute' are real."
             )
+
+        metrics.update(
+            {
+                "wall_duration_s": wall,
+                "expected_duration_s": expected,
+                "n_segments": log["n_segments"],
+            }
+        )
+        return metrics
+
+    def append_error_log(self, filename, metrics):
+        if self.log is None:
+            return
+        row = dict(metrics)
+        row.update(
+            {
+                "script": self.__class__.__name__,
+                "mode": self.mode,
+                "episode": os.path.splitext(os.path.basename(filename))[0],
+                "speedup": self.speedup,
+                "max_error": self.max_error,
+                "chunk_size": self.chunk_size,
+                "max_plan_age": self.max_plan_age,
+            }
+        )
+        append_row(self.log, row)
+        print(f"[{self.__class__.__name__}]   Logged metrics: {self.log}")
 
     def save_log(self, filename, log):
         if self.output_dir is None:

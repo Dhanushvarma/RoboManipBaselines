@@ -57,6 +57,19 @@ degrees and the gripper in counts. Use `--dry_run` to inspect it with no hardwar
 $ python ./ReplayBsplineDemo.py <rmb_file> --config ../envs/configs/RealUR5eBSplineDemoEnv.yaml --mode segments
 ```
 
+### Plot replay error vs speedup
+Plot joint error against speedup from the CSVs written by the two replay scripts'
+`--log` option. Writes six PNGs: maximum and RMS joint error, each for the fit,
+execute and track stages, with one line per replay mode. Rows from both scripts share
+one schema, so the `ur_rtde` baseline appears on the same axes as the B-spline modes.
+Gripper columns are logged but not plotted.
+
+```console
+$ python ./ReplayBsplineDemo.py <rmb_file> --config ../envs/configs/RealUR5eBSplineDemoEnv.yaml \
+    --mode segments --speedup 2.0 --log ./replay_errors.csv
+$ python ./PlotReplayErrors.py ./replay_errors.csv --output_dir ./replay_error_plots
+```
+
 ## Visualization utilities
 ### Plot B-spline fit quality
 Fit demonstration data with the same settings training uses and plot the result. Fully
