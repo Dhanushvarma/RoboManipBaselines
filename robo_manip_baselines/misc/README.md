@@ -32,6 +32,18 @@ Update the task description attribute in RMB format files. It accepts a path to 
 $ python ./RefineRmbData.py <rmb_file> --task_desc "<new_description>" [--overwrite]
 ```
 
+### Replay demonstration data verbatim
+Replay recorded demonstrations through `RealUR5eEnvBase` (ur_rtde servoJ) and report
+joint tracking error. This is the control baseline: the demos
+were recorded through this same env, so anything wrong here is the robot or the
+controller. Reports the recording's *own* tracking error alongside this run's, so a
+replay can be judged against how well the arm tracked when the data was captured.
+Requires the robot: the env opens its RTDE connection on construction.
+
+```console
+$ python ./ReplayRealUR5eDemo.py <rmb_file> --config ../envs/configs/RealUR5eDemoEnv.yaml
+```
+
 ### Replay demonstration data through the B-spline stack
 Replay a recorded demonstration at three levels of the B-spline policy stack, to
 separate a lossy spline representation from a badly trained policy. Each mode adds
