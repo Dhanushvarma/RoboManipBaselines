@@ -296,6 +296,7 @@ class RealUR5eBSplineEnvBase(RealEnvBase):
         self._stop_event = threading.Event()
         self._sampler_thread = None
         self._last_gripper_time = 0.0
+        self._last_gripper_sent = 0.0
         self.sampler_stats = LoopStats(self.spline_period)
         self.plan_exhausted = False
 
@@ -494,13 +495,23 @@ class RealUR5eBSplineEnvBase(RealEnvBase):
                 seg = self._segment
 
             if seg is not None:
-                # Stale-plan watchdog: if the policy has stopped delivering
-                # segments, hold position rather than replaying a dead plan.
-                if tick_start - seg["installed_at"] > self.stale_plan_timeout:
+                # Stale-plan watchdog: if nothing new has arrived well after this
+                # plan should have finished, hold position rather than sitting on
+                # a dead plan's final pose forever.
+                #
+                # Measured from when the plan *runs out*, not when it was
+                # installed: plan length is data-dependent (a policy chunk spans
+                # ~1.2 s, a whole-episode segment from the replay diagnostic
+                # spans ~18 s), so a fixed timeout from install would kill any
+                # long but perfectly healthy plan mid-motion.
+                plan_duration = (seg["t_max"] - seg["t_min"]) / (
+                    seg["speedup"] * seg["origin_time_scale"]
+                )
+                age = tick_start - seg["installed_at"]
+                if age > plan_duration + self.stale_plan_timeout:
                     print(
-                        f"[{self.__class__.__name__}] Stale plan "
-                        f"({tick_start - seg['installed_at']:.2f}s since last "
-                        f"segment); holding position."
+                        f"[{self.__class__.__name__}] Stale plan ({age:.2f}s since "
+                        f"install, plan spans {plan_duration:.2f}s); holding position."
                     )
                     with self._segment_lock:
                         self._segment = None
@@ -553,10 +564,17 @@ class RealUR5eBSplineEnvBase(RealEnvBase):
 
         gripper_command = float(np.clip(command[6], 0.0, 255.0))
         if now - self._last_gripper_time >= self.gripper_period:
-            self.gripper.move(int(gripper_command), self.gripper_speed, self.gripper_force)
+            self._last_gripper_sent = float(int(gripper_command))
+            self.gripper.move(
+                int(gripper_command), self.gripper_speed, self.gripper_force
+            )
             self._last_gripper_time = now
 
-        self._last_command = np.concatenate([arm_command, [gripper_command]])
+        # Record the value actually sent, not the value just sampled: the gripper
+        # is commanded at gripper_rate (~20 Hz), well below the sampler, so the
+        # two differ. Logging the sampled value would make the replay diagnostic
+        # report a gripper tracking error that is really just this rate gap.
+        self._last_command = np.concatenate([arm_command, [self._last_gripper_sent]])
 
     # ------------------------------------------------------------- gym API ---
 
@@ -599,6 +617,7 @@ class RealUR5eBSplineEnvBase(RealEnvBase):
 
         gripper_pos = float(action[self.body_config_list[0].gripper_joint_idxes][0])
         self.gripper.move(int(gripper_pos), self.gripper_speed, self.gripper_force)
+        self._last_gripper_sent = float(int(gripper_pos))
         self._last_command = np.concatenate([arm_joint_pos_command, [gripper_pos]])
 
         elapsed_duration = time.time() - start_time

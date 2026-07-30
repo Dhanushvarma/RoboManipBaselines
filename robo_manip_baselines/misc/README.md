@@ -32,7 +32,32 @@ Update the task description attribute in RMB format files. It accepts a path to 
 $ python ./RefineRmbData.py <rmb_file> --task_desc "<new_description>" [--overwrite]
 ```
 
+### Replay demonstration data through the B-spline stack
+Replay a recorded demonstration at three levels of the B-spline policy stack, to
+separate a lossy spline representation from a badly trained policy. Each mode adds
+exactly one component: `raw` is the controller alone, `spline` adds the whole-episode
+fit, and `segments` adds chunking, segment alignment and the high-rate sampler (a
+perfect-prediction oracle rollout). `bin/Rollout.py` adds the trained network on top.
+Prints a `demo -> fitted -> commanded -> measured` error decomposition, per joint in
+degrees and the gripper in counts. Use `--dry_run` to inspect it with no hardware.
+
+```console
+$ python ./ReplayBsplineDemo.py <rmb_file> --config ../envs/configs/RealUR5eBSplineDemoEnv.yaml --mode segments
+```
+
 ## Visualization utilities
+### Plot B-spline fit quality
+Fit demonstration data with the same settings training uses and plot the result. Fully
+offline: no robot, no policy, no checkpoint. Writes one PNG per episode (demo vs fitted
+per joint, reconstruction error against the tolerance, gripper, knot density) plus a
+dataset summary (compression, per-joint error, segment spans, knots vs length). Saves
+by default rather than opening windows, since forwarding figures over `ssh -X` is very
+slow; pass `--show` for an interactive window.
+
+```console
+$ python ./PlotBsplineFit.py <rmb_file> --output_dir ./bspline_fit_plots
+```
+
 ### Visualize camera images
 Display the web camera image for recording the experiments.
 ```console

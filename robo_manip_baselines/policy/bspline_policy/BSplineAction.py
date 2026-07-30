@@ -106,6 +106,34 @@ def extract_unique_knots(t_full: np.ndarray, degree: int) -> np.ndarray:
     return t_full[degree:-degree]
 
 
+def whole_episode_params(compressor: ScipyBSplineCompression) -> np.ndarray:
+    """Pack a whole-episode fit into one ``(n_knots, 1 + action_dim)`` matrix.
+
+    Same layout as a training chunk -- column 0 knots, the rest control points --
+    just longer, so it can be handed to anything that consumes a segment
+    (``eval_bspline_at``, ``bspline_span``, the env's
+    ``install_bspline_segment``). None of those hardcode the chunk length.
+
+    scipy gives ``len(c) == len(t) - degree - 1``; the trailing rows are padded
+    with the final control point exactly as ``chunk_bspline_trajectory`` does,
+    and are discarded again on decode.
+
+    Used by the replay diagnostic to play a whole episode as a single segment.
+    """
+    if compressor.spline is None:
+        raise ValueError("Please call compress() before packing parameters")
+
+    degree = compressor.degree
+    t_full, c_full, _ = compressor.spline.tck
+
+    params = np.zeros((len(t_full), 1 + c_full.shape[1]), dtype=np.float64)
+    params[:, 0] = t_full
+    params[: len(c_full), 1:] = c_full
+    if len(c_full) < len(t_full):
+        params[len(c_full) :, 1:] = c_full[-1]
+    return params
+
+
 def chunk_bspline_trajectory(
     compressor: ScipyBSplineCompression,
     chunk_size: int = 8,
