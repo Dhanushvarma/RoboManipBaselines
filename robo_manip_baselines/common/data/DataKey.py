@@ -103,22 +103,17 @@ class DataKey:
 
     @classmethod
     def get_num_eef(cls, env):
-        from ..body.ArmManager import ArmConfig
-
         return len(
             [
                 body_config
                 for body_config in env.unwrapped.body_config_list
-                if isinstance(body_config, ArmConfig)
-                and (body_config.eef_idx is not None)
+                if body_config.HAS_EEF and (body_config.eef_idx is not None)
             ]
         )
 
     @classmethod
     def get_dim(cls, key, env):
         """Get the dimension of the data specified by key."""
-        from ..body.ArmManager import ArmConfig
-
         if key == DataKey.TIME:
             return 1
         elif key in (
@@ -134,7 +129,7 @@ class DataKey:
             return sum(
                 len(body_config.arm_joint_idxes) + len(body_config.gripper_joint_idxes)
                 for body_config in env.unwrapped.body_config_list
-                if isinstance(body_config, ArmConfig)
+                if body_config.HAS_ARM
             )
         elif key in (
             DataKey.MEASURED_GRIPPER_JOINT_POS,
@@ -145,7 +140,7 @@ class DataKey:
             return sum(
                 len(body_config.gripper_joint_idxes)
                 for body_config in env.unwrapped.body_config_list
-                if isinstance(body_config, ArmConfig)
+                if body_config.HAS_GRIPPER
             )
         elif key in (
             DataKey.MEASURED_EEF_POSE,
@@ -281,8 +276,6 @@ class DataKey:
     @classmethod
     def get_plot_scale(cls, key, env):
         """Get scale to plot data."""
-        from ..body.ArmManager import ArmConfig
-
         if key in (
             DataKey.MEASURED_JOINT_POS,
             DataKey.COMMAND_JOINT_POS,
@@ -292,7 +285,7 @@ class DataKey:
             scale_arr = np.zeros(cls.get_dim(key, env))
 
             for body_config in env.unwrapped.body_config_list:
-                if not isinstance(body_config, ArmConfig):
+                if not body_config.HAS_ARM:
                     continue
 
                 scale_arr[body_config.arm_joint_idxes] = 1.0

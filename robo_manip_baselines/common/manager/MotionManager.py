@@ -1,6 +1,5 @@
 import numpy as np
 
-from ..body.ArmManager import ArmManager
 from ..data.DataKey import DataKey
 
 
@@ -60,16 +59,16 @@ class MotionManager:
         elif key == DataKey.MEASURED_GRIPPER_JOINT_POS:
             return self.env.unwrapped.get_gripper_joint_pos_from_obs(obs)
         elif key == DataKey.MEASURED_EEF_POSE:
-            num_arm_managers = sum(
-                isinstance(body_manager, ArmManager)
+            num_eef_managers = sum(
+                body_manager.body_config.HAS_EEF
                 for body_manager in self.body_manager_list
             )
-            measured_eef_pose_list = [None] * num_arm_managers
+            measured_eef_pose_list = [None] * num_eef_managers
 
             measured_joint_pos = self.env.unwrapped.get_joint_pos_from_obs(obs)
 
             for body_manager in self.body_manager_list:
-                if not isinstance(body_manager, ArmManager):
+                if not body_manager.body_config.HAS_EEF:
                     continue
 
                 measured_eef_pose = body_manager.get_eef_pose_from_joint_pos(

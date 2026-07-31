@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from ..body.ArmManager import ArmManager
 from ..data.DataKey import DataKey
 
 
@@ -96,7 +95,7 @@ class GraspPhaseBase(PhaseBase, ABC):
         )
 
         for body_manager in self.op.motion_manager.body_manager_list:
-            if not isinstance(body_manager, ArmManager):
+            if not body_manager.body_config.HAS_GRIPPER:
                 continue
 
             self.gripper_joint_pos[

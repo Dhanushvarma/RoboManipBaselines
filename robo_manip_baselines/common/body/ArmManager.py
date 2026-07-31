@@ -266,6 +266,10 @@ class ArmConfig(BodyConfigBase):
 
     BodyManagerClass = ArmManager
 
+    HAS_ARM = True
+    HAS_GRIPPER = True
+    HAS_EEF = True
+
     # URDF file loaded for robot model in Pinocchio library
     arm_urdf_path: str
 
