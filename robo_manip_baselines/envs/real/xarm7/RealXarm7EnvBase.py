@@ -154,6 +154,10 @@ class RealXarm7EnvBase(RealEnvBase):
     def _set_action(self, action, duration=None, joint_vel_limit_scale=0.5, wait=False):
         start_time = time.time()
 
+        # The SDK caps joint speed at pi rad/s, so cap it here too. Otherwise the
+        # command is allowed to get further ahead of the arm than the arm can move.
+        joint_vel_limit_scale = min(joint_vel_limit_scale, np.pi / self.joint_vel_limit)
+
         # Overwrite duration or joint_pos for safety
         action, duration = self.overwrite_command_for_safety(
             action, duration, joint_vel_limit_scale
