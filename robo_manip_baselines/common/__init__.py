@@ -31,7 +31,12 @@ from .utils.MathUtils import (
     get_se3_from_rel_pose,
     euler_to_rotation_matrix,
 )
-from .utils.PoseUtils import get_pose9_from_pose7, get_pose7_from_pose9
+from .utils.PoseUtils import (
+    POSE_REPR_LIST,
+    get_pose9_from_pose7,
+    get_pose7_from_pose9,
+    convert_pose_repr,
+)
 from .utils.VisionUtils import (
     crop_and_resize,
     convert_depth_image_to_color_image,

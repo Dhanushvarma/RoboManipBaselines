@@ -14,6 +14,7 @@ class TrainMain:
         "DiffusionPolicy3d",
         "FlowPolicy",
         "ManiFlowPolicy",
+        "UmiDp",
     ]
 
     def __init__(self):
