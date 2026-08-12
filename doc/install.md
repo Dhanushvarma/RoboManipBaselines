@@ -135,6 +135,22 @@ $ pip install -e .
 > $ PYTORCH3D_FORCE_NO_CUDA=1 pip install -e .
 > ```
 
+### [UMI diffusion policy](../robo_manip_baselines/policy/umi_dp)
+Install dependent libraries including [UMI](https://github.com/real-stanford/universal_manipulation_interface):
+```console
+# Go to the top directory of this repository
+$ pip install -e .[umi-dp]
+
+# Only needed if the repository was cloned without --recursive
+$ git submodule update --init third_party/universal_manipulation_interface
+```
+
+> [!NOTE]
+> Unlike the other policies, there is no `pip install -e .` step inside `third_party/universal_manipulation_interface`; UMI ships no `setup.py`. Its `diffusion_policy` package is put on `sys.path` by [`UmiDpUtils.py`](../robo_manip_baselines/policy/umi_dp/UmiDpUtils.py), which also ensures it shadows the same-named package used by [Diffusion policy](#diffusion-policy).
+
+> [!NOTE]
+> The first training run downloads the CLIP ViT backbone (`vit_base_patch16_clip_224.openai`, about 600 MB) from Hugging Face.
+
 ## Installation of each teleoperation device
 Complete [the common installation](#common-installation) first.
 

@@ -99,6 +99,14 @@ maniflow-policy = [
   "timm",
   "huggingface_hub<=0.25.0"
 ]
+umi-dp = [
+  "zarr>=2.12.0",
+  "numcodecs",
+  "einops",
+  "diffusers==0.11.1",
+  "huggingface_hub==0.21.4",
+  "timm",
+]
 tacto = [
   "pybullet",
   "omegaconf>=2.0.6",
