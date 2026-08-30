@@ -72,6 +72,21 @@ class ArmManager(BodyManagerBase):
             )
         self.pin_data = self.pin_model.createData()
 
+        # use cumulative conservative limits obtained from URDF and env action space
+        self.arm_joint_pos_low = np.maximum(
+            self.pin_model.lowerPositionLimit,
+            self.env.action_space.low[self.body_config.arm_action_idxes],
+        )
+        self.arm_joint_pos_high = np.minimum(
+            self.pin_model.upperPositionLimit,
+            self.env.action_space.high[self.body_config.arm_action_idxes],
+        )
+
+        if self.body_config.ik_rest_joint_pos is None:
+            self.ik_rest_joint_pos = self.body_config.init_arm_joint_pos.copy()
+        else:
+            self.ik_rest_joint_pos = self.body_config.ik_rest_joint_pos.copy()
+
         self.reset(init=True)
 
     def reset(self, init=False):
@@ -242,16 +257,38 @@ class ArmManager(BodyManagerBase):
             self.body_config.ik_eef_joint_id,
         )  # in joint frame
         J = -1 * np.dot(pin.Jlog6(error_se3.inverse()), J)
-        damping_scale = 1e-6
-        delta_arm_joint_pos = -1 * J.T.dot(
-            np.linalg.solve(
-                J.dot(J.T)
-                + (np.dot(error_vec, error_vec) + damping_scale) * np.identity(6),
-                error_vec,
+        damping = np.dot(error_vec, error_vec) + self.body_config.ik_damping_min
+        J_pinv = J.T.dot(np.linalg.inv(J.dot(J.T) + damping * np.identity(6)))
+        delta_arm_joint_pos = -1 * J_pinv.dot(error_vec)
+
+        # Use the redundant DOF to pull it toward a rest posture:
+        # 1. Without this the joints keep drifting, even when the end-effector comes
+        #    back to the same pose.
+        # 2. Build the projector from the SVD, not J_pinv. J_pinv is damped, so using
+        #    it here would let this term move the end-effector.
+        # 3. Scale small singular values down smoothly instead of cutting them off. A
+        #    hard cutoff makes the joints oscillate when the target cannot be reached.
+        if self.body_config.ik_nullspace_gain > 0.0:
+            _, sv, Vt = np.linalg.svd(J, full_matrices=False)
+            sv_eps = self.body_config.ik_nullspace_rcond * sv[0]
+            sv_weight = sv**2 / (sv**2 + sv_eps**2)
+            nullspace_proj = np.identity(self.pin_model.nv) - (Vt.T * sv_weight).dot(Vt)
+            delta_arm_joint_pos += nullspace_proj.dot(
+                self.body_config.ik_nullspace_gain
+                * (self.ik_rest_joint_pos - arm_joint_pos)
             )
-        )
-        self.arm_joint_pos = pin.integrate(
-            self.pin_model, arm_joint_pos, delta_arm_joint_pos
+
+        if self.body_config.ik_max_joint_step is not None:
+            step_scale = self.body_config.ik_max_joint_step / max(
+                np.abs(delta_arm_joint_pos).max(), 1e-12
+            )
+            if step_scale < 1.0:
+                delta_arm_joint_pos *= step_scale
+
+        self.arm_joint_pos = np.clip(
+            pin.integrate(self.pin_model, arm_joint_pos, delta_arm_joint_pos),
+            self.arm_joint_pos_low,
+            self.arm_joint_pos_high,
         )
         self.forward_kinematics()
 
@@ -311,6 +348,24 @@ class ArmConfig(BodyConfigBase):
 
     # [Optional] Function to get the current arm root pose (used only for drawing markers)
     get_root_pose_func: Optional[Callable[..., Any]] = None
+
+    # [Optional] Smallest IK damping. The error-based part drops to zero as the arm
+    # converges, which is when a near-singular Jacobian gives the largest joint step.
+    ik_damping_min: float = 1e-3
+
+    # [Optional] Gain of the posture task. Stops the joints of a redundant arm from
+    # drifting. On a 6-DoF arm it moves the end-effector by a few tens of microns.
+    ik_nullspace_gain: float = 0.1
+
+    # [Optional] Singular values below this fraction of the largest one are handed to
+    # the posture task, so it can move the arm away from a singularity.
+    ik_nullspace_rcond: float = 1e-2
+
+    # [Optional] Largest joint step one IK iteration may take [rad]
+    ik_max_joint_step: Optional[float] = np.deg2rad(2.0)
+
+    # [Optional] Posture the posture task pulls toward (default: init_arm_joint_pos)
+    ik_rest_joint_pos: Optional[npt.NDArray[np.float64]] = None
 
     def __post_init__(self):
         if self.gripper_joint_idxes_for_limit is None:

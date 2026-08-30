@@ -19,6 +19,7 @@ class RolloutMain:
         "DiffusionPolicy3d",
         "FlowPolicy",
         "ManiFlowPolicy",
+        "UmiDp",
         "Gr00t",
         "Pi0",
     ]

@@ -46,3 +46,6 @@
 	path = third_party/lerobot
 	url = https://github.com/huggingface/lerobot.git
 	ignore = untracked
+[submodule "third_party/universal_manipulation_interface"]
+	path = third_party/universal_manipulation_interface
+	url = https://github.com/real-stanford/universal_manipulation_interface.git
