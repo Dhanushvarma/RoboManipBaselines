@@ -127,9 +127,13 @@ class DataKey:
             DataKey.COMMAND_JOINT_TORQUE,
         ):
             return sum(
-                len(body_config.arm_joint_idxes) + len(body_config.gripper_joint_idxes)
+                len(body_config.arm_joint_idxes)
                 for body_config in env.unwrapped.body_config_list
                 if body_config.HAS_ARM
+            ) + sum(
+                len(body_config.gripper_joint_idxes)
+                for body_config in env.unwrapped.body_config_list
+                if body_config.HAS_GRIPPER
             )
         elif key in (
             DataKey.MEASURED_GRIPPER_JOINT_POS,
@@ -285,11 +289,10 @@ class DataKey:
             scale_arr = np.zeros(cls.get_dim(key, env))
 
             for body_config in env.unwrapped.body_config_list:
-                if not body_config.HAS_ARM:
-                    continue
-
-                scale_arr[body_config.arm_joint_idxes] = 1.0
-                scale_arr[body_config.gripper_joint_idxes] = 0.01
+                if body_config.HAS_ARM:
+                    scale_arr[body_config.arm_joint_idxes] = 1.0
+                if body_config.HAS_GRIPPER:
+                    scale_arr[body_config.gripper_joint_idxes] = 0.01
 
             return scale_arr
         elif key in (
