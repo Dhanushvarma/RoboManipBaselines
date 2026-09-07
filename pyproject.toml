@@ -31,7 +31,9 @@ dependencies = [
   "imageio>=2.14.1",
   "videoio==0.3.0",
   "gymnasium==1.0.0",
-  "mujoco==3.1.6",
+  # Pinned: mink needs >=3.10, and gymnasium's viewer still passes scn to
+  # mjv_moveCamera, which mujoco dropped in 3.11.
+  "mujoco==3.10.0",
   "pin",
   "pyspacemouse==1.1.4",
   "torch==2.10.0",
