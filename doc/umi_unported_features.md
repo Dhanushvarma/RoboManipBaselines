@@ -20,7 +20,6 @@ Paths are relative to `third_party/universal_manipulation_interface/diffusion_po
 | --- | --- |
 | zarr `ReplayBuffer` + `SequenceSampler` | Replaced by `UmiDpDataset` reading `.rmb` — the point of the integration |
 | Per-key `down_sample_steps` | All keys use `3` in `umi.yaml`; RMB's global `--skip 3` is identical in effect |
-| Multiple cameras | Single-arm, single-camera scope; `umi.yaml` also has only `camera0_rgb` |
 | Multi-robot / bimanual | Single-arm scope |
 | Transformer policy variant | UMI's config uses the UNet variant |
 | `ignore_rgb` during normalizer fitting | Speed optimization only; same resulting statistics |

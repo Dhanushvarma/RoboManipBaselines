@@ -20,10 +20,10 @@ from robo_manip_baselines.common import (  # noqa: E402
 )
 
 from .UmiDpDataset import (  # noqa: E402
-    CAMERA_KEY,
     EEF_POS_KEY,
     EEF_ROT_KEY,
     GRIPPER_KEY,
+    get_camera_key,
 )
 
 
@@ -94,7 +94,7 @@ class RolloutUmiDp(RolloutBase):
         print(
             f"  - obs horizon: {self.model_meta_info['data']['obs_horizon']}, "
             f"action horizon: {self.model_meta_info['data']['action_horizon']}\n"
-            f"  - camera: {self.model_meta_info['data']['camera_name']}, image size: {image_size}\n"
+            f"  - image size: {image_size}\n"
             f"  - backbone: {policy_meta_info['model_name']}"
         )
 
@@ -102,7 +102,12 @@ class RolloutUmiDp(RolloutBase):
 
     def setup_plot(self):
         fig_ax = plt.subplots(
-            1, 2, figsize=(13.5, 6.0), dpi=60, squeeze=False, constrained_layout=True
+            1,
+            len(self.camera_names) + 1,
+            figsize=(13.5, 6.0),
+            dpi=60,
+            squeeze=False,
+            constrained_layout=True,
         )
         super().setup_plot(fig_ax)
 
@@ -114,15 +119,18 @@ class RolloutUmiDp(RolloutBase):
 
     def get_obs(self):
         """Get the current observation in absolute form, as un-anchored numpy arrays."""
-        camera_name = self.model_meta_info["data"]["camera_name"]
         image_size = self.model_meta_info["data"]["image_size"]
 
-        image = self.info["rgb_images"][camera_name]
-        image = cv2.resize(image, tuple(image_size))
-        image = np.moveaxis(image, -1, -3).astype(np.float32) / 255.0
+        images = {}
+        for camera_idx, camera_name in enumerate(self.camera_names):
+            image = self.info["rgb_images"][camera_name]
+            image = cv2.resize(image, tuple(image_size))
+            images[get_camera_key(camera_idx)] = (
+                np.moveaxis(image, -1, -3).astype(np.float32) / 255.0
+            )
 
         return {
-            CAMERA_KEY: image,
+            **images,
             "eef_pose": get_pose9_from_pose7(
                 self.motion_manager.get_data(DataKey.MEASURED_EEF_POSE, self.obs)
             ),
@@ -155,7 +163,12 @@ class RolloutUmiDp(RolloutBase):
         )
 
         input_data = {
-            CAMERA_KEY: np.stack([obs[CAMERA_KEY] for obs in self.obs_buf]),
+            **{
+                get_camera_key(camera_idx): np.stack(
+                    [obs[get_camera_key(camera_idx)] for obs in self.obs_buf]
+                )
+                for camera_idx in range(len(self.camera_names))
+            },
             EEF_POS_KEY: eef_pose[:, :3],
             EEF_ROT_KEY: eef_pose[:, 3:9],
             GRIPPER_KEY: np.stack([obs[GRIPPER_KEY] for obs in self.obs_buf]),
@@ -191,10 +204,8 @@ class RolloutUmiDp(RolloutBase):
             _ax.cla()
             _ax.axis("off")
 
-        camera_name = self.model_meta_info["data"]["camera_name"]
-        self.ax[0, 0].imshow(self.info["rgb_images"][camera_name])
-        self.ax[0, 0].set_title(camera_name, fontsize=20)
-        self.plot_action(self.ax[0, 1])
+        self.plot_images(self.ax[0, 0 : len(self.camera_names)])
+        self.plot_action(self.ax[0, len(self.camera_names)])
 
         self.canvas.draw()
         cv2.imshow(

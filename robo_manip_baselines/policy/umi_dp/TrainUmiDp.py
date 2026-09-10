@@ -34,10 +34,10 @@ from robo_manip_baselines.common import (  # noqa: E402
 
 from .UmiDpDataset import (  # noqa: E402
     ACTION_DIM,
-    CAMERA_KEY,
     EEF_ROT_KEY,
     LOW_DIM_KEYS,
     UmiDpDataset,
+    get_camera_key,
     get_shape_meta,
 )
 
@@ -64,7 +64,8 @@ class TrainUmiDp(TrainBase):
             action_keys=[DataKey.COMMAND_EEF_POSE, DataKey.COMMAND_GRIPPER_JOINT_POS]
         )
 
-        # UMI's observation contract has exactly one camera, mapped to camera0_rgb
+        # Cameras map to camera{i}_rgb by position. Each gets its own backbone
+        # (share_rgb_model=False), so lower the batch size when passing more than one.
         parser.set_defaults(camera_names=["hand"])
 
         parser.add_argument(
@@ -142,10 +143,12 @@ class TrainUmiDp(TrainBase):
     def setup_args(self):
         super().setup_args()
 
-        if len(self.args.camera_names) != 1:
+        # Without an rgb entry TimmObsEncoder leaves image_shape None and dies far from
+        # here, on feature_map_shape.
+        if len(self.args.camera_names) < 1:
             raise ValueError(
-                f"[{self.__class__.__name__}] UmiDp takes exactly one camera: "
-                f"{self.args.camera_names}"
+                f"[{self.__class__.__name__}] UmiDp is vision-conditioned and needs at "
+                f"least one camera: {self.args.camera_names}"
             )
 
     def setup_model_meta_info(self):
@@ -153,7 +156,6 @@ class TrainUmiDp(TrainBase):
 
         self.model_meta_info["data"].update(
             {
-                "camera_name": self.args.camera_names[0],
                 "obs_horizon": self.args.obs_horizon,
                 "action_horizon": self.args.action_horizon,
                 "image_size": self.args.image_size,
@@ -172,7 +174,10 @@ class TrainUmiDp(TrainBase):
             }
         )
         self.model_meta_info["policy"]["shape_meta"] = get_shape_meta(
-            self.args.obs_horizon, self.args.action_horizon, self.args.image_size
+            self.args.obs_horizon,
+            self.args.action_horizon,
+            self.args.image_size,
+            len(self.args.camera_names),
         )
 
     def set_data_stats(self):
@@ -236,7 +241,10 @@ class TrainUmiDp(TrainBase):
                 normalizer[key] = get_identity_normalizer_from_stat(stat)
             else:
                 normalizer[key] = get_range_normalizer_from_stat(stat)
-        normalizer[CAMERA_KEY] = get_image_identity_normalizer()
+        # Every rgb key needs an entry: the policy normalizes the whole obs dict. A fresh
+        # normalizer per camera, since LinearNormalizer stores params_dict by reference.
+        for camera_idx in range(len(self.args.camera_names)):
+            normalizer[get_camera_key(camera_idx)] = get_image_identity_normalizer()
 
         return normalizer
 

@@ -11,12 +11,22 @@ from robo_manip_baselines.common import (
 
 # Observation keys of the policy, named as in UMI (`diffusion_policy/config/task/umi.yaml`).
 # Note that `robot0_eef_rot_axis_angle` holds a 6D rotation, not an axis angle; the name is UMI's.
-CAMERA_KEY = "camera0_rgb"
 EEF_POS_KEY = "robot0_eef_pos"
 EEF_ROT_KEY = "robot0_eef_rot_axis_angle"
 GRIPPER_KEY = "robot0_gripper_width"
 
 LOW_DIM_KEYS = (EEF_POS_KEY, EEF_ROT_KEY, GRIPPER_KEY)
+
+
+def get_camera_key(camera_idx):
+    """UMI's camera key for the camera at that position in ``camera_names``.
+
+    The RMB name to UMI key mapping is positional, so it is fixed when the checkpoint is
+    written and reproduced from it at rollout. Swapping two cameras that keep their names
+    would silently feed each view to the other's backbone.
+    """
+    return f"camera{camera_idx}_rgb"
+
 
 # Action is UMI's 10D layout: position (3) + 6D rotation (6) + gripper (1)
 ACTION_DIM = 10
@@ -27,19 +37,24 @@ ACTION_DIM = 10
 # config/task/umi.yaml), and its convert_pose_mat_rep accepts it too.
 
 
-def get_shape_meta(obs_horizon, action_horizon, image_size):
+def get_shape_meta(obs_horizon, action_horizon, image_size, num_cameras):
     """
     Build the shape_meta that TimmObsEncoder and DiffusionUnetTimmPolicy consume.
 
     Only `shape`, `type` and `horizon` are read; UMI's `latency_steps` / `down_sample_steps` /
     `rotation_rep` are consumed by its sampler, which `UmiDpDataset` replaces.
+
+    Every camera shares `image_size`: TimmObsEncoder asserts the rgb entries agree on it.
     """
     return {
         "obs": {
-            CAMERA_KEY: {
-                "shape": [3, image_size[1], image_size[0]],
-                "type": "rgb",
-                "horizon": obs_horizon,
+            **{
+                get_camera_key(camera_idx): {
+                    "shape": [3, image_size[1], image_size[0]],
+                    "type": "rgb",
+                    "horizon": obs_horizon,
+                }
+                for camera_idx in range(num_cameras)
             },
             EEF_POS_KEY: {"shape": [3], "type": "low_dim", "horizon": obs_horizon},
             EEF_ROT_KEY: {"shape": [6], "type": "low_dim", "horizon": obs_horizon},
@@ -88,7 +103,7 @@ class UmiDpDataset(DatasetBase):
         obs_horizon = self.model_meta_info["data"]["obs_horizon"]
         action_horizon = self.model_meta_info["data"]["action_horizon"]
         image_size = self.model_meta_info["data"]["image_size"]
-        camera_name = self.model_meta_info["data"]["camera_name"]
+        camera_names = self.model_meta_info["image"]["camera_names"]
         episode_idx, time_idx = self.chunk_info_list[chunk_idx]
 
         with RmbData(
@@ -111,7 +126,13 @@ class UmiDpDataset(DatasetBase):
             command_gripper = rmb_data[DataKey.COMMAND_GRIPPER_JOINT_POS][::skip][
                 action_idxes
             ]
-            images = rmb_data[DataKey.get_rgb_image_key(camera_name)][::skip][obs_idxes]
+            # Decoded inside the `with`, and already resized to image_size by RmbData.
+            images = {
+                get_camera_key(camera_idx): rmb_data[
+                    DataKey.get_rgb_image_key(camera_name)
+                ][::skip][obs_idxes]
+                for camera_idx, camera_name in enumerate(camera_names)
+            }
 
         # The anchor is the latest observation, so obs and action share one frame
         anchor_pose = measured_pose[-1]
@@ -125,10 +146,13 @@ class UmiDpDataset(DatasetBase):
         # Image augmentation lives in TimmObsEncoder, matching UMI, so only the dtype/layout
         # conversion happens here (`umi_dataset.py:266`)
         obs = {
-            CAMERA_KEY: torch.tensor(
-                np.moveaxis(images, -1, -3).astype(np.float32) / 255.0,
-                dtype=torch.float32,
-            ),
+            **{
+                camera_key: torch.tensor(
+                    np.moveaxis(image, -1, -3).astype(np.float32) / 255.0,
+                    dtype=torch.float32,
+                )
+                for camera_key, image in images.items()
+            },
             EEF_POS_KEY: torch.tensor(obs_pose[:, :3], dtype=torch.float32),
             EEF_ROT_KEY: torch.tensor(obs_pose[:, 3:9], dtype=torch.float32),
             GRIPPER_KEY: torch.tensor(gripper, dtype=torch.float32),
