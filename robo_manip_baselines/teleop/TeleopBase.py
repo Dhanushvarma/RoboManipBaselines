@@ -54,7 +54,7 @@ class StandbyTeleopPhase(PhaseBase):
         is_ready = all(
             [input_device.is_ready() for input_device in self.op.input_device_list]
         )
-        return is_ready and self.op.key == ord("n")
+        return is_ready and (self.op.auto_mode or self.op.key == ord("n"))
 
 
 class SyncPhase(PhaseBase):
@@ -92,7 +92,12 @@ class TeleopPhase(PhaseBase):
         self.op.teleop_time_idx += 1
 
     def check_transition(self):
-        if self.op.key == ord("n"):
+        # A scripted device ends its own episode; a human presses 'n'.
+        device_finished = self.op.auto_mode and all(
+            getattr(input_device, "is_finished", lambda: False)()
+            for input_device in self.op.input_device_list
+        )
+        if device_finished or self.op.key == ord("n"):
             print(
                 f"[{self.op.__class__.__name__}] Finish teleoperation. duration: {self.get_elapsed_duration():.1f} [s]"
             )
@@ -106,6 +111,8 @@ class EndTeleopPhase(PhaseBase):
     def start(self):
         super().start()
 
+        if self.op.auto_mode:
+            return
         if (not self.op.args.save_success_only) or (self.op.reward >= 1.0):
             print(
                 f"[{self.op.__class__.__name__}] Press the 's' key if the teleoperation succeeded, or the 'f' key if it failed."
@@ -116,9 +123,29 @@ class EndTeleopPhase(PhaseBase):
             )
 
     def post_update(self):
-        if ((not self.op.args.save_success_only) or (self.op.reward >= 1.0)) and (
-            self.op.key == ord("s")
-        ):
+        savable = (not self.op.args.save_success_only) or (self.op.reward >= 1.0)
+
+        if self.op.auto_mode:
+            if savable:
+                self.op.result["success"].append(bool(self.op.reward >= 1.0))
+                self.op.result["reward"].append(float(self.op.reward))
+                self.op.result["duration"].append(self.op.episode_duration)
+                self.op.save_data()
+            else:
+                print(
+                    f"[{self.op.__class__.__name__}] Discard the episode and retry. "
+                    f"reward: {self.op.reward:.1f}"
+                )
+            self.op.reset_flag = True
+            # episode_idx counts saved episodes, so a discarded one neither consumes an
+            # index nor shifts the world_idx cycle.
+            if (self.op.args.auto_demo_count is not None) and (
+                self.op.data_manager.episode_idx >= self.op.args.auto_demo_count
+            ):
+                self.op.quit_flag = True
+            return
+
+        if savable and (self.op.key == ord("s")):
             self.op.result["success"].append(bool(self.op.reward >= 1.0))
             self.op.result["reward"].append(float(self.op.reward))
             self.op.result["duration"].append(self.op.episode_duration)
@@ -299,6 +326,19 @@ class TeleopBase(OperationDataMixin, ABC):
         )
 
         parser.add_argument(
+            "--auto_demo",
+            action="store_true",
+            help="run without key presses: the input device ends each episode itself, and"
+            " an episode that cannot be saved is discarded and retried",
+        )
+        parser.add_argument(
+            "--auto_demo_count",
+            type=int,
+            default=None,
+            help="stop after this many saved episodes (default: until interrupted)",
+        )
+
+        parser.add_argument(
             "--result_filename",
             type=str,
             default=None,
@@ -309,8 +349,8 @@ class TeleopBase(OperationDataMixin, ABC):
             "--input_device",
             type=str,
             default="spacemouse",
-            choices=["spacemouse", "keyboard", "gello", "vive"],
-            help="input device for teleoperation",
+            choices=["spacemouse", "keyboard", "gello", "vive", "scripted"],
+            help="input device for teleoperation ('scripted' drives itself; see --auto_demo)",
         )
         parser.add_argument(
             "--input_device_config", type=str, help="configuration file of input device"
@@ -393,7 +433,9 @@ class TeleopBase(OperationDataMixin, ABC):
         if self.args.world_random_scale is not None:
             self.args.world_random_scale = np.array(self.args.world_random_scale)
 
-        self.auto_mode = (self.args.replay_log is not None) and self.args.auto_replay
+        self.auto_mode = (
+            (self.args.replay_log is not None) and self.args.auto_replay
+        ) or self.args.auto_demo
 
         if self.args.seed < 0:
             self.args.seed = int(time.time()) % (2**32)
