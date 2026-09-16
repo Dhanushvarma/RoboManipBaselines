@@ -61,9 +61,10 @@ class SyncPhase(PhaseBase):
     def start(self):
         super().start()
 
-        print(
-            f"[{self.op.__class__.__name__}] Press the 'n' key to start teleoperation with recording."
-        )
+        if not self.op.auto_mode:
+            print(
+                f"[{self.op.__class__.__name__}] Press the 'n' key to start teleoperation with recording."
+            )
 
     def pre_update(self):
         for input_device in self.op.input_device_list:
@@ -71,7 +72,7 @@ class SyncPhase(PhaseBase):
             input_device.set_command_data()
 
     def check_transition(self):
-        return self.op.key == ord("n")
+        return self.op.auto_mode or (self.op.key == ord("n"))
 
 
 class TeleopPhase(PhaseBase):
@@ -581,7 +582,7 @@ class TeleopBase(OperationDataMixin, ABC):
             self.replay_data_manager.load_data(replay_file, skip_image=True)
             print(
                 f"[{self.__class__.__name__}] Load teleoperation data "
-                f"({self.replay_file_idx+1}/{len(self.replay_filenames)}): {replay_file}\n"
+                f"({self.replay_file_idx + 1}/{len(self.replay_filenames)}): {replay_file}\n"
                 f"  - replay keys: {self.args.replay_keys}"
             )
             world_idx = self.replay_data_manager.get_meta_data("world_idx")
