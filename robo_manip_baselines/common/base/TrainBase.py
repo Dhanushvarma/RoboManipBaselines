@@ -10,7 +10,8 @@ from abc import ABC, abstractmethod
 import numpy as np
 import psutil
 import torch
-from torch.utils.data import DataLoader
+from torch.nn.parallel import DistributedDataParallel
+from torch.utils.data import DataLoader, DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 
 from ..data.CachedDataset import CachedDataset
@@ -23,11 +24,17 @@ from ..utils.MiscUtils import remove_prefix
 
 
 class TrainBase(ABC):
+    # Set True in a policy whose train_loop steps through wrap_ddp's result and calls
+    # set_sampler_epoch. Other policies refuse to start under torchrun.
+    supports_ddp = False
+
     @property
     def policy_name(self):
         return remove_prefix(self.__class__.__name__, "Train")
 
     def __init__(self):
+        self.setup_distributed()
+
         self.setup_args()
 
         set_random_seed(self.args.seed)
@@ -41,6 +48,34 @@ class TrainBase(ABC):
         self.setup_policy()
 
         self.load_ckpt()
+
+        # All ranks used one seed above so they split train/val files the same way.
+        # Reseed so each rank draws different augmentation; DDP already synced the weights.
+        if self.is_distributed:
+            set_random_seed(self.args.seed + self.rank)
+
+    def setup_distributed(self):
+        """Join the process group when launched by torchrun. A plain python run stays on one GPU."""
+        self.world_size = int(os.environ.get("WORLD_SIZE", 1))
+        self.rank = int(os.environ.get("RANK", 0))
+        self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        self.is_distributed = self.world_size > 1
+        self.is_main_process = self.rank == 0
+
+        if not self.is_distributed:
+            return
+
+        if not self.supports_ddp:
+            raise ValueError(
+                f"[{self.__class__.__name__}] {self.policy_name} does not support multi-GPU training. Run it without torchrun."
+            )
+
+        # After this, a bare .cuda() puts tensors on this rank's GPU
+        torch.cuda.set_device(self.local_rank)
+        # Longer than the 10 min default: ranks may finish filling the image cache minutes apart
+        torch.distributed.init_process_group(
+            backend="nccl", timeout=datetime.timedelta(hours=1)
+        )
 
     def setup_args(self, parser=None, argv=None):
         if parser is None:
@@ -201,6 +236,12 @@ class TrainBase(ABC):
                 )
             )
 
+        # Ranks can get different timestamps above, so all use rank 0's directory
+        if self.is_distributed:
+            checkpoint_dir = [self.args.checkpoint_dir]
+            torch.distributed.broadcast_object_list(checkpoint_dir, src=0)
+            self.args.checkpoint_dir = checkpoint_dir[0]
+
     def set_additional_args(self, parser):
         pass
 
@@ -263,7 +304,9 @@ class TrainBase(ABC):
         self.val_dataloader = self.make_dataloader(val_filenames, shuffle=False)
 
         # Setup tensorboard
-        self.writer = SummaryWriter(self.args.checkpoint_dir)
+        self.writer = (
+            SummaryWriter(self.args.checkpoint_dir) if self.is_main_process else None
+        )
 
         # Print dataset information
         self.print_dataset_info()
@@ -391,10 +434,19 @@ class TrainBase(ABC):
         if self.args.use_cached_dataset:
             dataset = CachedDataset(dataset)
 
+        # Gives each rank a different part of the data, and shuffles in place of the DataLoader.
+        # batch_size stays per GPU.
+        sampler = (
+            DistributedSampler(dataset, shuffle=shuffle, seed=self.args.seed)
+            if self.is_distributed
+            else None
+        )
+
         dataloader = DataLoader(
             dataset,
             batch_size=self.args.batch_size,
-            shuffle=shuffle,
+            shuffle=shuffle and sampler is None,
+            sampler=sampler,
             pin_memory=True,
             num_workers=self.args.num_workers,
             persistent_workers=True,
@@ -451,15 +503,16 @@ class TrainBase(ABC):
 
     def run(self):
         # Save model meta info
-        os.makedirs(self.args.checkpoint_dir, exist_ok=True)
-        model_meta_info_path = os.path.join(
-            self.args.checkpoint_dir, "model_meta_info.pkl"
-        )
-        with open(model_meta_info_path, "wb") as f:
-            pickle.dump(self.model_meta_info, f)
-        print(
-            f"[{self.__class__.__name__}] Save model meta info: {model_meta_info_path}"
-        )
+        if self.is_main_process:
+            os.makedirs(self.args.checkpoint_dir, exist_ok=True)
+            model_meta_info_path = os.path.join(
+                self.args.checkpoint_dir, "model_meta_info.pkl"
+            )
+            with open(model_meta_info_path, "wb") as f:
+                pickle.dump(self.model_meta_info, f)
+            print(
+                f"[{self.__class__.__name__}] Save model meta info: {model_meta_info_path}"
+            )
 
         # Train loop
         print(
@@ -471,6 +524,28 @@ class TrainBase(ABC):
     @abstractmethod
     def train_loop(self):
         pass
+
+    def wrap_ddp(self, policy):
+        """
+        Wrap the policy in DDP, or return it unchanged on one GPU.
+
+        Gradients are averaged across GPUs only when the train step calls the returned wrapper. Keep
+        using the unwrapped policy for EMA, validation and checkpoints, so saved keys have no "module."
+        prefix.
+        """
+        if not self.is_distributed:
+            return policy
+        return DistributedDataParallel(policy, device_ids=[self.local_rank])
+
+    def set_sampler_epoch(self, epoch):
+        """Give DistributedSampler a new shuffle each epoch. Does nothing on one GPU."""
+        if self.is_distributed:
+            self.train_dataloader.sampler.set_epoch(epoch)
+
+    def mean_over_ranks(self, value):
+        tensor = torch.tensor(value, dtype=torch.float64, device="cuda")
+        torch.distributed.all_reduce(tensor)
+        return tensor.item() / self.world_size
 
     def detach_batch_result(self, batch_result):
         for k, v in batch_result.items():
@@ -494,13 +569,20 @@ class TrainBase(ABC):
             epoch_summary[k] = np.mean(
                 [batch_result[k] for batch_result in batch_result_list]
             )
+            # Each rank saw a different part of the data
+            if self.is_distributed:
+                epoch_summary[k] = self.mean_over_ranks(epoch_summary[k])
 
-        for k, v in epoch_summary.items():
-            self.writer.add_scalar(f"{k}/{label}", v, epoch)
+        if self.writer is not None:
+            for k, v in epoch_summary.items():
+                self.writer.add_scalar(f"{k}/{label}", v, epoch)
 
         return epoch_summary
 
     def update_best_ckpt(self, epoch_summary, policy=None):
+        if not self.is_main_process:
+            return
+
         if policy is None:
             policy = self.policy
 
@@ -512,6 +594,9 @@ class TrainBase(ABC):
             }
 
     def save_current_ckpt(self, ckpt_suffix, policy=None):
+        if not self.is_main_process:
+            return
+
         if policy is None:
             policy = self.policy
 
@@ -519,6 +604,9 @@ class TrainBase(ABC):
         torch.save(policy.state_dict(), ckpt_path)
 
     def save_best_ckpt(self):
+        if not self.is_main_process:
+            return
+
         ckpt_path = os.path.join(self.args.checkpoint_dir, "policy_best.ckpt")
         torch.save(self.best_ckpt_info["state_dict"], ckpt_path)
         print(
@@ -535,4 +623,7 @@ class TrainBase(ABC):
         return mem_usage
 
     def close(self):
-        self.writer.close()
+        if self.writer is not None:
+            self.writer.close()
+        if self.is_distributed:
+            torch.distributed.destroy_process_group()
