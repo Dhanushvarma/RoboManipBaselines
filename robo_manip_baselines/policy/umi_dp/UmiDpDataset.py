@@ -113,7 +113,15 @@ class UmiDpDataset(DatasetBase):
         image_size = self.model_meta_info["data"]["image_size"]
         camera_names = self.model_meta_info["image"]["camera_names"]
 
-        for filename in tqdm(self.filenames, desc="Decoding images into RmbData cache"):
+        # Under torchrun every rank fills its own cache; show one progress bar
+        is_other_rank = (
+            torch.distributed.is_initialized() and torch.distributed.get_rank() != 0
+        )
+        for filename in tqdm(
+            self.filenames,
+            desc="Decoding images into RmbData cache",
+            disable=is_other_rank,
+        ):
             with RmbData(
                 filename, self.enable_rmb_cache, image_size=image_size
             ) as rmb_data:

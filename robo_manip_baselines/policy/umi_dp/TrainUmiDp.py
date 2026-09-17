@@ -47,6 +47,10 @@ class TrainUmiDp(TrainBase):
 
     DatasetClass = UmiDpDataset
 
+    # Launch with `torchrun --standalone --nproc_per_node <num_gpus> ./bin/Train.py UmiDp ...`.
+    # --batch_size is per GPU, as in UMI.
+    supports_ddp = True
+
     def set_additional_args(self, parser):
         parser.set_defaults(enable_rmb_cache=True)
 
@@ -221,7 +225,11 @@ class TrainUmiDp(TrainBase):
         # Only low-dim data is needed, as in UMI's `sampler.ignore_rgb(True)`
         dataset.load_images = False
         try:
-            for batch in tqdm(dataloader, desc="Iterating dataset to fit normalizer"):
+            for batch in tqdm(
+                dataloader,
+                desc="Iterating dataset to fit normalizer",
+                disable=not self.is_main_process,
+            ):
                 for key in LOW_DIM_KEYS:
                     data_cache[key].append(batch["obs"][key].numpy())
                 data_cache["action"].append(batch["action"].numpy())
@@ -350,12 +358,20 @@ class TrainUmiDp(TrainBase):
 
         self.load_ckpt()
 
+        # Same object as self.policy on one GPU
+        self.ddp_policy = self.wrap_ddp(self.policy)
+
     def train_loop(self):
-        for epoch in tqdm(range(self.args.num_epochs)):
+        for epoch in tqdm(
+            range(self.args.num_epochs), disable=not self.is_main_process
+        ):
+            self.set_sampler_epoch(epoch)
+
             # Run train step
             batch_result_list = []
             for data in self.train_dataloader:
-                loss = self.policy.compute_loss(dict_apply(data, lambda x: x.cuda()))
+                # forward() is compute_loss; going through the wrapper averages gradients across GPUs
+                loss = self.ddp_policy(dict_apply(data, lambda x: x.cuda()))
                 loss.backward()
                 self.optimizer.step()
                 self.optimizer.zero_grad()
