@@ -218,10 +218,15 @@ class TrainUmiDp(TrainBase):
         dataloader = torch.utils.data.DataLoader(
             dataset, batch_size=64, num_workers=self.args.num_workers
         )
-        for batch in tqdm(dataloader, desc="Iterating dataset to fit normalizer"):
-            for key in LOW_DIM_KEYS:
-                data_cache[key].append(batch["obs"][key].numpy())
-            data_cache["action"].append(batch["action"].numpy())
+        # Only low-dim data is needed, as in UMI's `sampler.ignore_rgb(True)`
+        dataset.load_images = False
+        try:
+            for batch in tqdm(dataloader, desc="Iterating dataset to fit normalizer"):
+                for key in LOW_DIM_KEYS:
+                    data_cache[key].append(batch["obs"][key].numpy())
+                data_cache["action"].append(batch["action"].numpy())
+        finally:
+            dataset.load_images = True
 
         for key in data_cache:
             stacked = np.concatenate(data_cache[key])

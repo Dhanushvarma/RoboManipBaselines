@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from tqdm import tqdm
 
 from robo_manip_baselines.common import (
     DataKey,
@@ -95,6 +96,33 @@ class UmiDpDataset(DatasetBase):
             for time_idx in range(obs_horizon - 1, episode_len):
                 self.chunk_info_list.append((episode_idx, time_idx))
 
+        # Set to False to skip image decoding (see TrainUmiDp.fit_normalizer)
+        self.load_images = True
+
+        if self.enable_rmb_cache:
+            self.fill_rmb_cache()
+
+    def fill_rmb_cache(self):
+        """
+        Decode every image into the RmbData cache in this (main) process.
+
+        The cache is per process, so without this each DataLoader worker builds its own full copy.
+        Workers forked after this share the parent's copy instead.
+        """
+        skip = self.model_meta_info["data"]["skip"]
+        image_size = self.model_meta_info["data"]["image_size"]
+        camera_names = self.model_meta_info["image"]["camera_names"]
+
+        for filename in tqdm(self.filenames, desc="Decoding images into RmbData cache"):
+            with RmbData(
+                filename, self.enable_rmb_cache, image_size=image_size
+            ) as rmb_data:
+                if rmb_data.is_single_hdf5:  # RmbData caches only .rmb videos
+                    continue
+                for camera_name in camera_names:
+                    # Same access as __getitem__, so the cache key matches
+                    rmb_data[DataKey.get_rgb_image_key(camera_name)][::skip]
+
     def __len__(self):
         return len(self.chunk_info_list)
 
@@ -127,12 +155,14 @@ class UmiDpDataset(DatasetBase):
                 action_idxes
             ]
             # Decoded inside the `with`, and already resized to image_size by RmbData.
-            images = {
-                get_camera_key(camera_idx): rmb_data[
-                    DataKey.get_rgb_image_key(camera_name)
-                ][::skip][obs_idxes]
-                for camera_idx, camera_name in enumerate(camera_names)
-            }
+            images = {}
+            if self.load_images:
+                images = {
+                    get_camera_key(camera_idx): rmb_data[
+                        DataKey.get_rgb_image_key(camera_name)
+                    ][::skip][obs_idxes]
+                    for camera_idx, camera_name in enumerate(camera_names)
+                }
 
         # The anchor is the latest observation, so obs and action share one frame
         anchor_pose = measured_pose[-1]
