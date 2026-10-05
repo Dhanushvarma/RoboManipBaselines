@@ -32,13 +32,31 @@ def get_camera_key(camera_idx):
 # Action is UMI's 10D layout: position (3) + 6D rotation (6) + gripper (1)
 ACTION_DIM = 10
 
+# Optional action keys appended after UMI's 10D, in this order, when they are among the
+# action keys (see TrainUmiDp --predict_base_damping). Each is one dimension.
+EXTRA_ACTION_KEYS = (DataKey.COMMAND_BASE_DAMPING_LEVEL,)
+# Fixed rather than fitted, so every checkpoint normalizes the level alike and can emit
+# every level even when its data never used one.
+BASE_DAMPING_LEVEL_RANGE = (0.0, 2.0)  # 0 low, 1 medium, 2 high
+
+
+def get_extra_action_keys(action_keys):
+    return [key for key in EXTRA_ACTION_KEYS if key in action_keys]
+
+
+def get_action_dim(action_keys):
+    return ACTION_DIM + len(get_extra_action_keys(action_keys))
+
+
 # "delta" is accepted for the observation window but not advised: the window is anchored at its own last
 # step, so entry k becomes the inverse of entry k+1 and the absolute reference is lost. UMI discourages it
 # the same way, by comment rather than by check ("obs_pose_repr: relative # abs or rel" in
 # config/task/umi.yaml), and its convert_pose_mat_rep accepts it too.
 
 
-def get_shape_meta(obs_horizon, action_horizon, image_size, num_cameras):
+def get_shape_meta(
+    obs_horizon, action_horizon, image_size, num_cameras, action_dim=ACTION_DIM
+):
     """
     Build the shape_meta that TimmObsEncoder and DiffusionUnetTimmPolicy consume.
 
@@ -61,7 +79,7 @@ def get_shape_meta(obs_horizon, action_horizon, image_size, num_cameras):
             EEF_ROT_KEY: {"shape": [6], "type": "low_dim", "horizon": obs_horizon},
             GRIPPER_KEY: {"shape": [1], "type": "low_dim", "horizon": obs_horizon},
         },
-        "action": {"shape": [ACTION_DIM], "horizon": action_horizon},
+        "action": {"shape": [action_dim], "horizon": action_horizon},
     }
 
 
@@ -87,12 +105,22 @@ class UmiDpDataset(DatasetBase):
         skip = self.model_meta_info["data"]["skip"]
         obs_horizon = self.model_meta_info["data"]["obs_horizon"]
 
+        extra_action_keys = get_extra_action_keys(
+            self.model_meta_info["action"]["keys"]
+        )
+
         # Index every timestep that has a full observation window behind it. Action windows are clipped
         # at the episode end instead of being dropped, so late-episode behavior stays represented.
         self.chunk_info_list = []
         for episode_idx, filename in enumerate(self.filenames):
             with RmbData(filename) as rmb_data:
                 episode_len = rmb_data[DataKey.TIME][::skip].shape[0]
+                missing = [key for key in extra_action_keys if key not in rmb_data]
+            if missing:
+                raise KeyError(
+                    f"[{self.__class__.__name__}] {filename} has no {missing}, which the "
+                    f"action needs. Record with an env that saves them, or train without."
+                )
             for time_idx in range(obs_horizon - 1, episode_len):
                 self.chunk_info_list.append((episode_idx, time_idx))
 
@@ -154,6 +182,10 @@ class UmiDpDataset(DatasetBase):
             command_gripper = rmb_data[DataKey.COMMAND_GRIPPER_JOINT_POS][::skip][
                 action_idxes
             ]
+            extra_actions = [
+                rmb_data[key][::skip][action_idxes]
+                for key in get_extra_action_keys(self.model_meta_info["action"]["keys"])
+            ]
             # Decoded inside the `with`, and already resized to image_size by RmbData.
             images = {}
             if self.load_images:
@@ -188,7 +220,8 @@ class UmiDpDataset(DatasetBase):
             GRIPPER_KEY: torch.tensor(gripper, dtype=torch.float32),
         }
         action = torch.tensor(
-            np.concatenate([action_pose, command_gripper], axis=1), dtype=torch.float32
+            np.concatenate([action_pose, command_gripper, *extra_actions], axis=1),
+            dtype=torch.float32,
         )
 
         return {"obs": obs, "action": action}

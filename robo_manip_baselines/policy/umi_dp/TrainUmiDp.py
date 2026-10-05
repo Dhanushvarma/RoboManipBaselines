@@ -34,10 +34,13 @@ from robo_manip_baselines.common import (  # noqa: E402
 
 from .UmiDpDataset import (  # noqa: E402
     ACTION_DIM,
+    BASE_DAMPING_LEVEL_RANGE,
     EEF_ROT_KEY,
     LOW_DIM_KEYS,
     UmiDpDataset,
+    get_action_dim,
     get_camera_key,
+    get_extra_action_keys,
     get_shape_meta,
 )
 
@@ -134,6 +137,14 @@ class TrainUmiDp(TrainBase):
             "--weight_decay", type=float, default=1e-6, help="weight decay"
         )
         parser.add_argument(
+            "--predict_base_damping",
+            action=argparse.BooleanOptionalAction,
+            default=False,
+            help="also predict the whole-body controller's base-damping level "
+            f"({DataKey.COMMAND_BASE_DAMPING_LEVEL}) as an 11th action dimension. The data "
+            "must have been recorded with it.",
+        )
+        parser.add_argument(
             "--num_inference_steps",
             type=int,
             default=16,
@@ -142,6 +153,15 @@ class TrainUmiDp(TrainBase):
 
     def setup_args(self):
         super().setup_args()
+
+        if (
+            self.args.predict_base_damping
+            and DataKey.COMMAND_BASE_DAMPING_LEVEL not in self.args.action_keys
+        ):
+            self.args.action_keys = [
+                *self.args.action_keys,
+                DataKey.COMMAND_BASE_DAMPING_LEVEL,
+            ]
 
         # Without an rgb entry TimmObsEncoder leaves image_shape None and dies far from
         # here, on feature_map_shape.
@@ -178,6 +198,7 @@ class TrainUmiDp(TrainBase):
             self.args.action_horizon,
             self.args.image_size,
             len(self.args.camera_names),
+            get_action_dim(self.args.action_keys),
         )
 
     def set_data_stats(self):
@@ -195,7 +216,9 @@ class TrainUmiDp(TrainBase):
                 )
 
         self.model_meta_info["state"]["example"] = np.zeros(ACTION_DIM)
-        self.model_meta_info["action"]["example"] = np.zeros(ACTION_DIM)
+        self.model_meta_info["action"]["example"] = np.zeros(
+            get_action_dim(self.args.action_keys)
+        )
         self.model_meta_info["data"].update(
             {
                 "mean_episode_len": np.mean(episode_len_list),
@@ -233,13 +256,19 @@ class TrainUmiDp(TrainBase):
             data_cache[key] = stacked.reshape(-1, stacked.shape[-1])
 
         action = data_cache["action"]
-        normalizer["action"] = concatenate_normalizer(
-            [
-                get_range_normalizer_from_stat(array_to_stats(action[..., :3])),
-                get_identity_normalizer_from_stat(array_to_stats(action[..., 3:9])),
-                get_range_normalizer_from_stat(array_to_stats(action[..., 9:10])),
-            ]
-        )
+        action_normalizers = [
+            get_range_normalizer_from_stat(array_to_stats(action[..., :3])),
+            get_identity_normalizer_from_stat(array_to_stats(action[..., 3:9])),
+            get_range_normalizer_from_stat(array_to_stats(action[..., 9:10])),
+        ]
+        for idx, key in enumerate(get_extra_action_keys(self.args.action_keys)):
+            column = action[..., ACTION_DIM + idx : ACTION_DIM + idx + 1]
+            stat = array_to_stats(column)
+            if key == DataKey.COMMAND_BASE_DAMPING_LEVEL:
+                stat["min"] = np.full_like(stat["min"], BASE_DAMPING_LEVEL_RANGE[0])
+                stat["max"] = np.full_like(stat["max"], BASE_DAMPING_LEVEL_RANGE[1])
+            action_normalizers.append(get_range_normalizer_from_stat(stat))
+        normalizer["action"] = concatenate_normalizer(action_normalizers)
         for key in LOW_DIM_KEYS:
             stat = array_to_stats(data_cache[key])
             if key == EEF_ROT_KEY:
