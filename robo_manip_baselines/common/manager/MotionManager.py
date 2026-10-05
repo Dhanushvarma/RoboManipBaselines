@@ -81,6 +81,8 @@ class MotionManager:
             return self.env.unwrapped.get_mobile_pos_from_obs(obs)
         elif key == DataKey.MEASURED_MOBILE_OMNI_VEL:
             return self.env.unwrapped.get_mobile_vel_from_obs(obs)
+        elif key == DataKey.MEASURED_BASE_DAMPING_LEVEL:
+            return self.env.unwrapped.get_base_damping_level_from_obs(obs)
         else:
             raise ValueError(
                 f"[{self.__class__.__name__}] Invalid measured data key: {key}"
@@ -93,6 +95,7 @@ class MotionManager:
             DataKey.COMMAND_GRIPPER_JOINT_POS,
             DataKey.COMMAND_EEF_POSE,
             DataKey.COMMAND_MOBILE_OMNI_VEL,
+            DataKey.COMMAND_BASE_DAMPING_LEVEL,
         ]
         if key not in supported_data_keys:
             raise ValueError(
