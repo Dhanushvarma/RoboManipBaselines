@@ -33,19 +33,21 @@ def get_camera_key(camera_idx):
 ACTION_DIM = 10
 
 # Optional action keys appended after UMI's 10D, in this order, when they are among the
-# action keys (see TrainUmiDp --predict_base_damping). Each is one dimension.
-EXTRA_ACTION_KEYS = (DataKey.COMMAND_BASE_DAMPING_LEVEL,)
-# Fixed rather than fitted, so every checkpoint normalizes the level alike and can emit
-# every level even when its data never used one.
-BASE_DAMPING_LEVEL_RANGE = (0.0, 2.0)  # 0 low, 1 medium, 2 high
+# action keys (see TrainUmiDp --predict_wbc_mode), with their dimensions.
+EXTRA_ACTION_DIMS = {DataKey.COMMAND_WBC_MODE: 4}
+# Fixed rather than fitted, so every checkpoint normalizes the one-hot alike and can
+# emit every mode even when its data never used one.
+WBC_MODE_RANGE = (0.0, 1.0)
 
 
 def get_extra_action_keys(action_keys):
-    return [key for key in EXTRA_ACTION_KEYS if key in action_keys]
+    return [key for key in EXTRA_ACTION_DIMS if key in action_keys]
 
 
 def get_action_dim(action_keys):
-    return ACTION_DIM + len(get_extra_action_keys(action_keys))
+    return ACTION_DIM + sum(
+        EXTRA_ACTION_DIMS[key] for key in get_extra_action_keys(action_keys)
+    )
 
 
 # "delta" is accepted for the observation window but not advised: the window is anchored at its own last

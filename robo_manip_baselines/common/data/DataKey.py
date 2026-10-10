@@ -70,11 +70,11 @@ class DataKey:
     # Command velocity of omni-directional mobile base
     COMMAND_MOBILE_OMNI_VEL = "command_mobile_omni_vel"
 
-    # Measured base-damping level of a whole-body controller in force (0 low, 1 medium,
-    # 2 high): how much the controller leaves to the arm rather than the base
-    MEASURED_BASE_DAMPING_LEVEL = "measured_base_damping_level"
-    # Command base-damping level (0 low, 1 medium, 2 high)
-    COMMAND_BASE_DAMPING_LEVEL = "command_base_damping_level"
+    # Measured mode of a whole-body controller in force, one-hot over its weight sets
+    # (CALL-M: native, arm only, base xy only, base yaw only)
+    MEASURED_WBC_MODE = "measured_wbc_mode"
+    # Command mode of a whole-body controller, one-hot as above
+    COMMAND_WBC_MODE = "command_wbc_mode"
 
     # All keys of measured data
     MEASURED_DATA_KEYS = [
@@ -90,7 +90,7 @@ class DataKey:
         MEASURED_EEF_WRENCH,
         MEASURED_MOBILE_OMNI_POS,
         MEASURED_MOBILE_OMNI_VEL,
-        MEASURED_BASE_DAMPING_LEVEL,
+        MEASURED_WBC_MODE,
     ]
 
     # All keys of command data
@@ -106,7 +106,7 @@ class DataKey:
         # COMMAND_EEF_VEL,
         # COMMAND_EEF_WRENCH,
         COMMAND_MOBILE_OMNI_VEL,
-        COMMAND_BASE_DAMPING_LEVEL,
+        COMMAND_WBC_MODE,
     ]
 
     @classmethod
@@ -176,11 +176,8 @@ class DataKey:
             DataKey.COMMAND_MOBILE_OMNI_VEL,
         ):
             return 3
-        elif key in (
-            DataKey.MEASURED_BASE_DAMPING_LEVEL,
-            DataKey.COMMAND_BASE_DAMPING_LEVEL,
-        ):
-            return 1
+        elif key in (DataKey.MEASURED_WBC_MODE, DataKey.COMMAND_WBC_MODE):
+            return 4
         else:
             raise ValueError(f"[{cls.__name__}] Invalid data key: {key}")
 
