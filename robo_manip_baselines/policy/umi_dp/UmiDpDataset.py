@@ -99,6 +99,10 @@ class UmiDpDataset(DatasetBase):
     only pose the rollout can observe when it predicts. Because the action chunk starts at the anchor,
     there is no index offset between what the policy emits and what gets executed.
 
+    A step is `skip` recorded frames. By default t runs over every skip-th frame only, so the frames in
+    between are never read. With `sample_every_frame`, as in UMI's sampler, every recorded frame is a t
+    (its grid starts at offset t % skip), and the steps stay `skip` frames apart.
+
     Data is returned unnormalized; `DiffusionUnetTimmPolicy` normalizes internally via its
     `LinearNormalizer`.
     """
@@ -106,6 +110,11 @@ class UmiDpDataset(DatasetBase):
     def setup_variables(self):
         skip = self.model_meta_info["data"]["skip"]
         obs_horizon = self.model_meta_info["data"]["obs_horizon"]
+        # The frames a sample's grid may start at
+        if self.model_meta_info["data"]["sample_every_frame"]:
+            offsets = range(skip)
+        else:
+            offsets = [0]
 
         extra_action_keys = get_extra_action_keys(
             self.model_meta_info["action"]["keys"]
@@ -116,15 +125,17 @@ class UmiDpDataset(DatasetBase):
         self.chunk_info_list = []
         for episode_idx, filename in enumerate(self.filenames):
             with RmbData(filename) as rmb_data:
-                episode_len = rmb_data[DataKey.TIME][::skip].shape[0]
+                num_frames = rmb_data[DataKey.TIME].shape[0]
                 missing = [key for key in extra_action_keys if key not in rmb_data]
             if missing:
                 raise KeyError(
                     f"[{self.__class__.__name__}] {filename} has no {missing}, which the "
                     f"action needs. Record with an env that saves them, or train without."
                 )
-            for time_idx in range(obs_horizon - 1, episode_len):
-                self.chunk_info_list.append((episode_idx, time_idx))
+            for offset in offsets:
+                episode_len = len(range(offset, num_frames, skip))
+                for time_idx in range(obs_horizon - 1, episode_len):
+                    self.chunk_info_list.append((episode_idx, offset, time_idx))
 
         # Set to False to skip image decoding (see TrainUmiDp.fit_normalizer)
         self.load_images = True
@@ -139,7 +150,6 @@ class UmiDpDataset(DatasetBase):
         The cache is per process, so without this each DataLoader worker builds its own full copy.
         Workers forked after this share the parent's copy instead.
         """
-        skip = self.model_meta_info["data"]["skip"]
         image_size = self.model_meta_info["data"]["image_size"]
         camera_names = self.model_meta_info["image"]["camera_names"]
 
@@ -151,7 +161,20 @@ class UmiDpDataset(DatasetBase):
                     continue
                 for camera_name in camera_names:
                     # Same access as __getitem__, so the cache key matches
-                    rmb_data[DataKey.get_rgb_image_key(camera_name)][::skip]
+                    self.get_images(rmb_data, camera_name, offset=0)
+
+    def get_images(self, rmb_data, camera_name, offset):
+        """One camera's frames on a sample's grid: every skip-th one from `offset`."""
+        skip = self.model_meta_info["data"]["skip"]
+        video = rmb_data[DataKey.get_rgb_image_key(camera_name)]
+        if (
+            self.model_meta_info["data"]["sample_every_frame"]
+            and rmb_data.enable_cache
+            and not rmb_data.is_single_hdf5
+        ):
+            # Cached whole and sliced here: one cache entry per video, not one per offset
+            return video[:][offset::skip]
+        return video[offset::skip]
 
     def __len__(self):
         return len(self.chunk_info_list)
@@ -162,12 +185,12 @@ class UmiDpDataset(DatasetBase):
         action_horizon = self.model_meta_info["data"]["action_horizon"]
         image_size = self.model_meta_info["data"]["image_size"]
         camera_names = self.model_meta_info["image"]["camera_names"]
-        episode_idx, time_idx = self.chunk_info_list[chunk_idx]
+        episode_idx, offset, time_idx = self.chunk_info_list[chunk_idx]
 
         with RmbData(
             self.filenames[episode_idx], self.enable_rmb_cache, image_size=image_size
         ) as rmb_data:
-            episode_len = rmb_data[DataKey.TIME][::skip].shape[0]
+            episode_len = rmb_data[DataKey.TIME][offset::skip].shape[0]
 
             obs_idxes = np.arange(time_idx - obs_horizon + 1, time_idx + 1)
             action_idxes = np.clip(
@@ -175,26 +198,28 @@ class UmiDpDataset(DatasetBase):
             )
 
             measured_pose = get_pose9_from_pose7(
-                rmb_data[DataKey.MEASURED_EEF_POSE][::skip][obs_idxes]
+                rmb_data[DataKey.MEASURED_EEF_POSE][offset::skip][obs_idxes]
             )
             command_pose = get_pose9_from_pose7(
-                rmb_data[DataKey.COMMAND_EEF_POSE][::skip][action_idxes]
+                rmb_data[DataKey.COMMAND_EEF_POSE][offset::skip][action_idxes]
             )
-            gripper = rmb_data[DataKey.MEASURED_GRIPPER_JOINT_POS][::skip][obs_idxes]
-            command_gripper = rmb_data[DataKey.COMMAND_GRIPPER_JOINT_POS][::skip][
+            gripper = rmb_data[DataKey.MEASURED_GRIPPER_JOINT_POS][offset::skip][
+                obs_idxes
+            ]
+            command_gripper = rmb_data[DataKey.COMMAND_GRIPPER_JOINT_POS][offset::skip][
                 action_idxes
             ]
             extra_actions = [
-                rmb_data[key][::skip][action_idxes]
+                rmb_data[key][offset::skip][action_idxes]
                 for key in get_extra_action_keys(self.model_meta_info["action"]["keys"])
             ]
             # Decoded inside the `with`, and already resized to image_size by RmbData.
             images = {}
             if self.load_images:
                 images = {
-                    get_camera_key(camera_idx): rmb_data[
-                        DataKey.get_rgb_image_key(camera_name)
-                    ][::skip][obs_idxes]
+                    get_camera_key(camera_idx): self.get_images(
+                        rmb_data, camera_name, offset
+                    )[obs_idxes]
                     for camera_idx, camera_name in enumerate(camera_names)
                 }
 

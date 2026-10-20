@@ -85,6 +85,15 @@ class TrainUmiDp(TrainBase):
             default=[224, 224],
             help="image size (width, height); the CLIP ViT backbone expects 224x224",
         )
+        parser.add_argument(
+            "--sample_every_frame",
+            action=argparse.BooleanOptionalAction,
+            default=False,
+            help="start a sample at every recorded frame, as UMI's sampler does, rather "
+            "than only at every skip-th one. A sample still steps by skip, so the "
+            "policy's timing is unchanged. Uses every frame, but an epoch and the image "
+            "cache become skip times larger.",
+        )
 
         parser.add_argument(
             "--action_pose_repr",
@@ -138,6 +147,14 @@ class TrainUmiDp(TrainBase):
             "--weight_decay", type=float, default=1e-6, help="weight decay"
         )
         parser.add_argument(
+            "--encoder_lr_scale",
+            type=float,
+            default=0.1,
+            help="learning rate of the pretrained vision encoders, as a fraction of lr. "
+            "0.1 is UMI's (train_diffusion_unet_image_workspace.py), to keep what they "
+            "learned in pretraining; 1.0 trains them like the rest of the policy.",
+        )
+        parser.add_argument(
             "--predict_wbc_mode",
             action=argparse.BooleanOptionalAction,
             default=False,
@@ -180,8 +197,10 @@ class TrainUmiDp(TrainBase):
                 "obs_horizon": self.args.obs_horizon,
                 "action_horizon": self.args.action_horizon,
                 "image_size": self.args.image_size,
+                "sample_every_frame": self.args.sample_every_frame,
             }
         )
+        self.model_meta_info["train"]["encoder_lr_scale"] = self.args.encoder_lr_scale
         self.model_meta_info["state"]["pose_repr"] = self.args.state_pose_repr
         self.model_meta_info["action"]["pose_repr"] = self.args.action_pose_repr
         self.model_meta_info["policy"].update(
@@ -353,7 +372,9 @@ class TrainUmiDp(TrainBase):
             f"  - obs horizon: {self.args.obs_horizon}, action horizon: {self.args.action_horizon}\n"
             f"  - image size: {self.args.image_size}\n"
             f"  - backbone: {self.args.model_name}, aggregation: {obs_encoder.feature_aggregation}\n"
-            f"  - pose repr (state/action): {self.args.state_pose_repr} / {self.args.action_pose_repr}"
+            f"  - pose repr (state/action): {self.args.state_pose_repr} / {self.args.action_pose_repr}\n"
+            f"  - lr: {self.args.lr}, vision encoders x{self.args.encoder_lr_scale}\n"
+            f"  - sample every frame: {self.args.sample_every_frame}"
         )
 
         self.policy.set_normalizer(self.fit_normalizer(self.train_dataloader.dataset))
@@ -364,8 +385,20 @@ class TrainUmiDp(TrainBase):
             self.ema_policy = copy.deepcopy(self.policy)
             self.ema = EMAModel(model=self.ema_policy, power=0.75)
 
+        # As in UMI, the pretrained encoders train at a fraction of the learning rate
+        encoder_params = [
+            param
+            for param in self.policy.obs_encoder.parameters()
+            if param.requires_grad
+        ]
         self.optimizer = torch.optim.AdamW(
-            params=self.policy.parameters(),
+            params=[
+                {"params": self.policy.model.parameters()},
+                {
+                    "params": encoder_params,
+                    "lr": self.args.lr * self.args.encoder_lr_scale,
+                },
+            ],
             lr=self.args.lr,
             betas=[0.95, 0.999],
             eps=1e-8,
