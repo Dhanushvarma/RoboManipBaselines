@@ -215,6 +215,7 @@ class TrainBase(ABC):
             "data": {
                 "name": os.path.basename(os.path.normpath(self.args.dataset_dir)),
                 "skip": self.args.skip,
+                "record_dt": self.calc_record_dt(),
             },
             "policy": {"name": self.policy_name},
             "train": {
@@ -350,6 +351,19 @@ class TrainBase(ABC):
             }
         )
 
+    def calc_record_dt(self):
+        """Median time between two recorded frames [s], from the demos' time stamps.
+
+        A rollout spaces the policy's steps by `skip` of these, as in the demos. An
+        env's nominal dt only matches it if the env kept its rate while recording.
+        """
+        dt_list = []
+        for filename in self.all_filenames:
+            with RmbData(filename) as rmb_data:
+                dt_list.append(np.diff(rmb_data[DataKey.TIME][:]))
+        dt_seq = np.concatenate(dt_list)
+        return float(np.median(dt_seq)) if dt_seq.size > 0 else None
+
     def calc_stats_from_seq(self, data_seq):
         data_min = data_seq.min(axis=0)
         data_max = data_seq.max(axis=0)
@@ -404,11 +418,14 @@ class TrainBase(ABC):
         return dataloader
 
     def print_dataset_info(self):
+        record_dt = self.model_meta_info["data"]["record_dt"]
+        record_dt_str = "unknown" if record_dt is None else f"{1e3 * record_dt:.1f} ms"
         print(
             f"[{self.__class__.__name__}] Load dataset from {self.args.dataset_dir}\n"
             f"  - train size: {len(self.train_dataloader.dataset)}, files: {len(self.train_dataloader.dataset.filenames)}\n"
             f"  - val size: {len(self.val_dataloader.dataset)}, files: {len(self.val_dataloader.dataset.filenames)}\n"
-            f"  - episode len mean: {int(self.model_meta_info['data']['mean_episode_len'])}, min: {self.model_meta_info['data']['min_episode_len']}, max: {self.model_meta_info['data']['max_episode_len']}"
+            f"  - episode len mean: {int(self.model_meta_info['data']['mean_episode_len'])}, min: {self.model_meta_info['data']['min_episode_len']}, max: {self.model_meta_info['data']['max_episode_len']}\n"
+            f"  - recorded every {record_dt_str} (median)"
         )
         print(
             f"  - aug std state: {self.model_meta_info['state']['aug_std']}, action: {self.model_meta_info['action']['aug_std']}, "
