@@ -10,6 +10,13 @@ from robo_manip_baselines.common import (
     get_pose9_from_pose7,
 )
 
+from .UmiDpEllipsoid import (
+    ELLIPSOID_DIM,
+    encode_ellipsoid,
+    get_anchor_rotation,
+    load_ellipsoid_labels,
+)
+
 # Observation keys of the policy, named as in UMI (`diffusion_policy/config/task/umi.yaml`).
 # Note that `robot0_eef_rot_axis_angle` holds a 6D rotation, not an axis angle; the name is UMI's.
 EEF_POS_KEY = "robot0_eef_pos"
@@ -44,9 +51,12 @@ def get_extra_action_keys(action_keys):
     return [key for key in EXTRA_ACTION_DIMS if key in action_keys]
 
 
-def get_action_dim(action_keys):
-    return ACTION_DIM + sum(
-        EXTRA_ACTION_DIMS[key] for key in get_extra_action_keys(action_keys)
+def get_action_dim(action_keys, predict_ellipsoid=False):
+    """Action width: UMI's 10D, the extra action keys, then the ellipsoid (see UmiDpEllipsoid) last."""
+    return (
+        ACTION_DIM
+        + sum(EXTRA_ACTION_DIMS[key] for key in get_extra_action_keys(action_keys))
+        + (ELLIPSOID_DIM if predict_ellipsoid else 0)
     )
 
 
@@ -119,6 +129,9 @@ class UmiDpDataset(DatasetBase):
         extra_action_keys = get_extra_action_keys(
             self.model_meta_info["action"]["keys"]
         )
+        ellipsoid_info = self.model_meta_info["action"].get("ellipsoid")
+        # Per-episode ellipsoids in world axes, rotated into each sample's anchor frame in __getitem__
+        self.ellipsoid_list = None if ellipsoid_info is None else []
 
         # Index every timestep that has a full observation window behind it. Action windows are clipped
         # at the episode end instead of being dropped, so late-episode behavior stays represented.
@@ -127,6 +140,13 @@ class UmiDpDataset(DatasetBase):
             with RmbData(filename) as rmb_data:
                 num_frames = rmb_data[DataKey.TIME].shape[0]
                 missing = [key for key in extra_action_keys if key not in rmb_data]
+                if self.ellipsoid_list is not None:
+                    ellipsoid, _ = load_ellipsoid_labels(
+                        ellipsoid_info["label_dir"],
+                        filename,
+                        rmb_data[DataKey.MEASURED_EEF_POSE][:],
+                    )
+                    self.ellipsoid_list.append(ellipsoid)
             if missing:
                 raise KeyError(
                     f"[{self.__class__.__name__}] {filename} has no {missing}, which the "
@@ -213,6 +233,8 @@ class UmiDpDataset(DatasetBase):
                 rmb_data[key][offset::skip][action_idxes]
                 for key in get_extra_action_keys(self.model_meta_info["action"]["keys"])
             ]
+            if self.ellipsoid_list is not None:
+                ellipsoid = self.ellipsoid_list[episode_idx][offset::skip][action_idxes]
             # Decoded inside the `with`, and already resized to image_size by RmbData.
             images = {}
             if self.load_images:
@@ -231,6 +253,10 @@ class UmiDpDataset(DatasetBase):
         action_pose = convert_pose_repr(
             command_pose, anchor_pose, self.model_meta_info["action"]["pose_repr"]
         )
+        if self.ellipsoid_list is not None:
+            extra_actions.append(
+                encode_ellipsoid(ellipsoid, get_anchor_rotation(anchor_pose))
+            )
 
         # Image augmentation lives in TimmObsEncoder, matching UMI, so only the dtype/layout
         # conversion happens here (`umi_dataset.py:266`)

@@ -1,5 +1,6 @@
 import argparse
 import copy
+import os
 
 import numpy as np
 import torch
@@ -44,6 +45,7 @@ from .UmiDpDataset import (  # noqa: E402
     get_extra_action_keys,
     get_shape_meta,
 )
+from .UmiDpEllipsoid import ELLIPSOID_DIM, get_label_path  # noqa: E402
 
 
 class TrainUmiDp(TrainBase):
@@ -163,6 +165,14 @@ class TrainUmiDp(TrainBase):
             "dimensions. The data must have been recorded with it.",
         )
         parser.add_argument(
+            "--ellipsoid_label_dir",
+            type=str,
+            default=None,
+            help="also predict the shape of the arm's manipulability ellipsoid (6 dimensions, "
+            "last in the action; see UmiDpEllipsoid), from label files made with "
+            "manipulability-learning: one <episode name>.h5 per episode in this folder",
+        )
+        parser.add_argument(
             "--num_inference_steps",
             type=int,
             default=16,
@@ -213,13 +223,29 @@ class TrainUmiDp(TrainBase):
                 "num_inference_steps": self.args.num_inference_steps,
             }
         )
+        self.model_meta_info["action"]["ellipsoid"] = self.get_ellipsoid_info()
         self.model_meta_info["policy"]["shape_meta"] = get_shape_meta(
             self.args.obs_horizon,
             self.args.action_horizon,
             self.args.image_size,
             len(self.args.camera_names),
-            get_action_dim(self.args.action_keys),
+            get_action_dim(self.args.action_keys, self.predict_ellipsoid),
         )
+
+    @property
+    def predict_ellipsoid(self):
+        return self.args.ellipsoid_label_dir is not None
+
+    def get_ellipsoid_info(self):
+        """Where the ellipsoid labels came from, so a checkpoint says what it was trained on."""
+        if not self.predict_ellipsoid:
+            return None
+        from manipulability_learning.labels import read_labels
+
+        label_dir = os.path.abspath(self.args.ellipsoid_label_dir)
+        _, _, attrs = read_labels(get_label_path(label_dir, self.all_filenames[0]))
+        attrs.pop("source", None)  # names one episode, not the set
+        return {"label_dir": label_dir, "dim": ELLIPSOID_DIM, "label_attrs": attrs}
 
     def set_data_stats(self):
         """
@@ -237,7 +263,7 @@ class TrainUmiDp(TrainBase):
 
         self.model_meta_info["state"]["example"] = np.zeros(ACTION_DIM)
         self.model_meta_info["action"]["example"] = np.zeros(
-            get_action_dim(self.args.action_keys)
+            get_action_dim(self.args.action_keys, self.predict_ellipsoid)
         )
         self.model_meta_info["data"].update(
             {
@@ -290,6 +316,9 @@ class TrainUmiDp(TrainBase):
                 stat["max"] = np.full_like(stat["max"], WBC_MODE_RANGE[1])
             action_normalizers.append(get_range_normalizer_from_stat(stat))
             start = end
+        if self.predict_ellipsoid:
+            stat = array_to_stats(action[..., start : start + ELLIPSOID_DIM])
+            action_normalizers.append(get_range_normalizer_from_stat(stat))
         normalizer["action"] = concatenate_normalizer(action_normalizers)
         for key in LOW_DIM_KEYS:
             stat = array_to_stats(data_cache[key])

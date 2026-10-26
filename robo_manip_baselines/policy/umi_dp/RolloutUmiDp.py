@@ -25,6 +25,11 @@ from .UmiDpDataset import (  # noqa: E402
     GRIPPER_KEY,
     get_camera_key,
 )
+from .UmiDpEllipsoid import (  # noqa: E402
+    ELLIPSOID_DIM,
+    decode_ellipsoid,
+    get_anchor_rotation,
+)
 
 
 class RolloutUmiDp(RolloutBase):
@@ -33,6 +38,8 @@ class RolloutUmiDp(RolloutBase):
 
         self.state_pose_repr = self.model_meta_info["state"]["pose_repr"]
         self.action_pose_repr = self.model_meta_info["action"]["pose_repr"]
+        # Checkpoints from before the ellipsoid have no entry
+        self.ellipsoid_info = self.model_meta_info["action"].get("ellipsoid")
 
     def setup_policy(self):
         policy_meta_info = self.model_meta_info["policy"]
@@ -116,6 +123,10 @@ class RolloutUmiDp(RolloutBase):
 
         self.obs_buf = None
         self.policy_action_buf = None
+        self.policy_ellipsoid_buf = None
+        # Unit-determinant ellipsoid targets in world axes: the latest chunk, and this step's
+        self.policy_ellipsoid_chunk = None
+        self.policy_ellipsoid = None
 
     def get_obs(self):
         """Get the current observation in absolute form, as un-anchored numpy arrays."""
@@ -180,6 +191,20 @@ class RolloutUmiDp(RolloutBase):
 
         return input_data, anchor_pose
 
+    def split_ellipsoid(self, action, anchor_pose):
+        """
+        Remove the ellipsoid dims from a predicted chunk and keep them as world-axis targets.
+
+        Returns the chunk the action keys describe, so everything downstream sees the width it expects. The
+        targets go to `policy_ellipsoid_chunk`; no env consumes them yet.
+        """
+        if self.ellipsoid_info is None:
+            return action
+        self.policy_ellipsoid_chunk = decode_ellipsoid(
+            action[:, -ELLIPSOID_DIM:], get_anchor_rotation(anchor_pose)
+        )
+        return action[:, :-ELLIPSOID_DIM]
+
     def infer_policy(self):
         self.update_obs_buf()
 
@@ -189,12 +214,17 @@ class RolloutUmiDp(RolloutBase):
             # whole chunk is un-anchored here with no offset or prefix handling
             action = self.policy.predict_action(input_data)["action"][0]
             action = action.cpu().detach().numpy().astype(np.float64)
+            action = self.split_ellipsoid(action, anchor_pose)
             action[:, :9] = convert_pose_repr(
                 action[:, :9], anchor_pose, self.action_pose_repr, backward=True
             )
             self.policy_action_buf = list(action)
+            if self.policy_ellipsoid_chunk is not None:
+                self.policy_ellipsoid_buf = list(self.policy_ellipsoid_chunk)
 
         self.policy_action = self.policy_action_buf.pop(0)
+        if self.policy_ellipsoid_buf:
+            self.policy_ellipsoid = self.policy_ellipsoid_buf.pop(0)
         self.policy_action_list = np.concatenate(
             [self.policy_action_list, self.policy_action[np.newaxis]]
         )
