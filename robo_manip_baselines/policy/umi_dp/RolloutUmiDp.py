@@ -31,6 +31,7 @@ from .UmiDpEllipsoid import (  # noqa: E402
     ELLIPSOID_DIM,
     decode_ellipsoid,
     get_anchor_rotation,
+    get_ellipsoid_command,
 )
 
 # Columns per end-effector of the action keys that hold every end-effector's data:
@@ -49,6 +50,15 @@ class RolloutUmiDp(RolloutBase):
         self.action_pose_repr = self.model_meta_info["action"]["pose_repr"]
         # Checkpoints from before the ellipsoid have no entry
         self.ellipsoid_info = self.model_meta_info["action"].get("ellipsoid")
+        # A whole-body controller env takes the ellipsoid as a command
+        self.send_ellipsoid = (
+            DataKey.COMMAND_EEF_ELLIPSOID in self.env.unwrapped.command_keys_for_step
+        )
+        if self.ellipsoid_info is not None and not self.send_ellipsoid:
+            print(
+                f"[{self.__class__.__name__}] The env takes no "
+                f"{DataKey.COMMAND_EEF_ELLIPSOID}, so the predicted ellipsoid is not sent."
+            )
         # End-effector the policy drives on an env with several (older checkpoints have none)
         self.eef_idx = self.model_meta_info["data"].get("eef_idx")
         num_eef = DataKey.get_num_eef(self.env)
@@ -241,7 +251,8 @@ class RolloutUmiDp(RolloutBase):
         Remove the ellipsoid dims from a predicted chunk and keep them as world-axis targets.
 
         Returns the chunk the action keys describe, so everything downstream sees the width it expects. The
-        targets go to `policy_ellipsoid_chunk`; no env consumes them yet.
+        targets go to `policy_ellipsoid_chunk`, and an env that takes them gets one per step (see
+        set_ellipsoid_command_data).
         """
         if self.ellipsoid_info is None:
             return action
@@ -275,16 +286,21 @@ class RolloutUmiDp(RolloutBase):
         )
 
     def set_command_data(self, action_keys=None):
-        """
-        As in RolloutBase, except on an env with several end-effectors.
-
-        There the action has one end-effector's pose and gripper, and the env takes every
-        end-effector's command. The other end-effectors are sent their current command, so they
-        hold.
-        """
+        """As in RolloutBase, or for one end-effector of several (eef_idx); then the ellipsoid, if the env takes it."""
         if self.eef_idx is None:
             super().set_command_data(action_keys)
-            return
+        else:
+            self.set_one_eef_command_data(action_keys)
+        if self.send_ellipsoid:
+            self.set_ellipsoid_command_data()
+
+    def set_one_eef_command_data(self, action_keys=None):
+        """
+        Set the commands on an env with several end-effectors.
+
+        The action has one end-effector's pose and gripper, and the env takes every end-effector's
+        command. The other end-effectors are sent their current command, so they hold.
+        """
         if action_keys is None:
             action_keys = self.action_keys
 
@@ -305,6 +321,25 @@ class RolloutUmiDp(RolloutBase):
                 )
             self.motion_manager.set_command_data(key, command, is_skip)
             action_idx += action_dim
+
+    def set_ellipsoid_command_data(self):
+        """
+        Send this step's predicted shape as the driven end-effector's ellipsoid target.
+
+        The other end-effectors get no target (NaN), and neither does any before the first
+        prediction or with a policy that predicts none, so their controller task stays off.
+        """
+        command = np.full(
+            DataKey.get_dim(DataKey.COMMAND_EEF_ELLIPSOID, self.env), np.nan
+        )
+        if self.policy_ellipsoid is not None:
+            select_eef(command, self.eef_idx, ELLIPSOID_DIM)[:] = get_ellipsoid_command(
+                self.policy_ellipsoid
+            )
+        is_skip = self.rollout_time_idx % self.args.skip != 0
+        self.motion_manager.set_command_data(
+            DataKey.COMMAND_EEF_ELLIPSOID, command, is_skip
+        )
 
     def draw_plot(self):
         for _ax in np.ravel(self.ax):

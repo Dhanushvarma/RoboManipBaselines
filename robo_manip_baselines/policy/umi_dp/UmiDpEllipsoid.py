@@ -73,3 +73,10 @@ def decode_ellipsoid(action, anchor_rot):
     # Any trace the network leaves is dropped, so the target has exactly unit volume
     shape_log = spd.traceless(spd.unvec(action))
     return spd.expm(anchor_rot @ shape_log @ anchor_rot.T)
+
+
+def get_ellipsoid_command(ellipsoid):
+    """One end-effector's DataKey.COMMAND_EEF_ELLIPSOID entry (6,): the Mandel vector of a decoded ellipsoid."""
+    from manipulability_learning import spd
+
+    return spd.vec(ellipsoid)

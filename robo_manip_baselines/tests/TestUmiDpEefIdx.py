@@ -163,6 +163,7 @@ def make_rollout(eef_idx, num_arms=2):
         ],
         get_joint_pos_from_obs=lambda obs: obs["joint_pos"],
         get_gripper_joint_pos_from_obs=lambda obs: obs["joint_pos"][3::4],
+        command_keys_for_step=ACTION_KEYS,
     )
     env.unwrapped = env
 
@@ -174,6 +175,7 @@ def make_rollout(eef_idx, num_arms=2):
     rollout.action_keys = ACTION_KEYS
     rollout.camera_names = []
     rollout.eef_idx = eef_idx
+    rollout.send_ellipsoid = False
     rollout.rollout_time_idx = 0
     return rollout
 
