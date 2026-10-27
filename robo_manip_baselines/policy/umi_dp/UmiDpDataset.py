@@ -50,6 +50,19 @@ def get_action_dim(action_keys):
     )
 
 
+def select_eef(data, eef_idx, width):
+    """
+    Columns of end-effector `eef_idx` in data that holds every end-effector's side by side,
+    `width` each (7 for a pose, 1 for a gripper).
+
+    Gripper i belongs to end-effector i, as in RMB_OpenArm and RMB_Oat. With `eef_idx` None the
+    data is one end-effector's and is returned whole.
+    """
+    if eef_idx is None:
+        return data
+    return data[..., width * eef_idx : width * (eef_idx + 1)]
+
+
 # "delta" is accepted for the observation window but not advised: the window is anchored at its own last
 # step, so entry k becomes the inverse of entry k+1 and the absolute reference is lost. UMI discourages it
 # the same way, by comment rather than by check ("obs_pose_repr: relative # abs or rel" in
@@ -103,6 +116,9 @@ class UmiDpDataset(DatasetBase):
     between are never read. With `sample_every_frame`, as in UMI's sampler, every recorded frame is a t
     (its grid starts at offset t % skip), and the steps stay `skip` frames apart.
 
+    On data with several end-effectors (e.g. both arms of an OpenArm), the policy learns the one at
+    `eef_idx` and the others are left out.
+
     Data is returned unnormalized; `DiffusionUnetTimmPolicy` normalizes internally via its
     `LinearNormalizer`.
     """
@@ -119,6 +135,8 @@ class UmiDpDataset(DatasetBase):
         extra_action_keys = get_extra_action_keys(
             self.model_meta_info["action"]["keys"]
         )
+        # Older checkpoints have no eef_idx; they were trained on one end-effector
+        self.eef_idx = self.model_meta_info["data"].get("eef_idx")
 
         # Index every timestep that has a full observation window behind it. Action windows are clipped
         # at the episode end instead of being dropped, so late-episode behavior stays represented.
@@ -126,11 +144,22 @@ class UmiDpDataset(DatasetBase):
         for episode_idx, filename in enumerate(self.filenames):
             with RmbData(filename) as rmb_data:
                 num_frames = rmb_data[DataKey.TIME].shape[0]
+                num_eef = rmb_data[DataKey.MEASURED_EEF_POSE].shape[1] // 7
                 missing = [key for key in extra_action_keys if key not in rmb_data]
             if missing:
                 raise KeyError(
                     f"[{self.__class__.__name__}] {filename} has no {missing}, which the "
                     f"action needs. Record with an env that saves them, or train without."
+                )
+            if self.eef_idx is None and num_eef > 1:
+                raise ValueError(
+                    f"[{self.__class__.__name__}] {filename} has {num_eef} end-effectors. "
+                    "Choose the one to learn with --eef_idx."
+                )
+            if self.eef_idx is not None and not 0 <= self.eef_idx < num_eef:
+                raise ValueError(
+                    f"[{self.__class__.__name__}] {filename} has {num_eef} end-effectors, "
+                    f"so it has no eef_idx {self.eef_idx}."
                 )
             for offset in offsets:
                 episode_len = len(range(offset, num_frames, skip))
@@ -198,17 +227,29 @@ class UmiDpDataset(DatasetBase):
             )
 
             measured_pose = get_pose9_from_pose7(
-                rmb_data[DataKey.MEASURED_EEF_POSE][offset::skip][obs_idxes]
+                select_eef(
+                    rmb_data[DataKey.MEASURED_EEF_POSE][offset::skip][obs_idxes],
+                    self.eef_idx,
+                    7,
+                )
             )
             command_pose = get_pose9_from_pose7(
-                rmb_data[DataKey.COMMAND_EEF_POSE][offset::skip][action_idxes]
+                select_eef(
+                    rmb_data[DataKey.COMMAND_EEF_POSE][offset::skip][action_idxes],
+                    self.eef_idx,
+                    7,
+                )
             )
-            gripper = rmb_data[DataKey.MEASURED_GRIPPER_JOINT_POS][offset::skip][
-                obs_idxes
-            ]
-            command_gripper = rmb_data[DataKey.COMMAND_GRIPPER_JOINT_POS][offset::skip][
-                action_idxes
-            ]
+            gripper = select_eef(
+                rmb_data[DataKey.MEASURED_GRIPPER_JOINT_POS][offset::skip][obs_idxes],
+                self.eef_idx,
+                1,
+            )
+            command_gripper = select_eef(
+                rmb_data[DataKey.COMMAND_GRIPPER_JOINT_POS][offset::skip][action_idxes],
+                self.eef_idx,
+                1,
+            )
             extra_actions = [
                 rmb_data[key][offset::skip][action_idxes]
                 for key in get_extra_action_keys(self.model_meta_info["action"]["keys"])

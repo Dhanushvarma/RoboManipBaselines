@@ -15,6 +15,7 @@ from diffusers.schedulers.scheduling_ddim import DDIMScheduler  # noqa: E402
 from robo_manip_baselines.common import (  # noqa: E402
     DataKey,
     RolloutBase,
+    convert_data_from_policy,
     convert_pose_repr,
     get_pose9_from_pose7,
 )
@@ -24,7 +25,15 @@ from .UmiDpDataset import (  # noqa: E402
     EEF_ROT_KEY,
     GRIPPER_KEY,
     get_camera_key,
+    select_eef,
 )
+
+# Columns per end-effector of the action keys that hold every end-effector's data:
+# (in the policy's action, in the env's command)
+EEF_ACTION_DIMS = {
+    DataKey.COMMAND_EEF_POSE: (9, 7),
+    DataKey.COMMAND_GRIPPER_JOINT_POS: (1, 1),
+}
 
 
 class RolloutUmiDp(RolloutBase):
@@ -33,6 +42,19 @@ class RolloutUmiDp(RolloutBase):
 
         self.state_pose_repr = self.model_meta_info["state"]["pose_repr"]
         self.action_pose_repr = self.model_meta_info["action"]["pose_repr"]
+        # End-effector the policy drives on an env with several (older checkpoints have none)
+        self.eef_idx = self.model_meta_info["data"].get("eef_idx")
+        num_eef = DataKey.get_num_eef(self.env)
+        if self.eef_idx is None and num_eef > 1:
+            raise ValueError(
+                f"[{self.__class__.__name__}] The env has {num_eef} end-effectors, and "
+                "the policy was trained on data with one (without --eef_idx)."
+            )
+        if self.eef_idx is not None and not 0 <= self.eef_idx < num_eef:
+            raise ValueError(
+                f"[{self.__class__.__name__}] The policy drives end-effector "
+                f"{self.eef_idx}, and the env has {num_eef}."
+            )
 
     def setup_policy(self):
         policy_meta_info = self.model_meta_info["policy"]
@@ -111,6 +133,21 @@ class RolloutUmiDp(RolloutBase):
         )
         super().setup_plot(fig_ax)
 
+        if self.eef_idx is not None:
+            # The env's scales cover every end-effector, the action one of them
+            self.action_plot_scale = np.concatenate(
+                [
+                    select_eef(
+                        DataKey.get_plot_scale_for_policy(key, self.env),
+                        self.eef_idx,
+                        EEF_ACTION_DIMS[key][0],
+                    )
+                    if key in EEF_ACTION_DIMS
+                    else DataKey.get_plot_scale_for_policy(key, self.env)
+                    for key in self.action_keys
+                ]
+            )
+
     def reset_variables(self):
         super().reset_variables()
 
@@ -132,10 +169,18 @@ class RolloutUmiDp(RolloutBase):
         return {
             **images,
             "eef_pose": get_pose9_from_pose7(
-                self.motion_manager.get_data(DataKey.MEASURED_EEF_POSE, self.obs)
+                select_eef(
+                    self.motion_manager.get_data(DataKey.MEASURED_EEF_POSE, self.obs),
+                    self.eef_idx,
+                    7,
+                )
             ),
-            GRIPPER_KEY: self.motion_manager.get_data(
-                DataKey.MEASURED_GRIPPER_JOINT_POS, self.obs
+            GRIPPER_KEY: select_eef(
+                self.motion_manager.get_data(
+                    DataKey.MEASURED_GRIPPER_JOINT_POS, self.obs
+                ),
+                self.eef_idx,
+                1,
             ),
         }
 
@@ -198,6 +243,38 @@ class RolloutUmiDp(RolloutBase):
         self.policy_action_list = np.concatenate(
             [self.policy_action_list, self.policy_action[np.newaxis]]
         )
+
+    def set_command_data(self, action_keys=None):
+        """
+        As in RolloutBase, except on an env with several end-effectors.
+
+        There the action has one end-effector's pose and gripper, and the env takes every
+        end-effector's command. The other end-effectors are sent their current command, so they
+        hold.
+        """
+        if self.eef_idx is None:
+            super().set_command_data(action_keys)
+            return
+        if action_keys is None:
+            action_keys = self.action_keys
+
+        is_skip = self.rollout_time_idx % self.args.skip != 0
+        action_idx = 0
+        for key in action_keys:
+            if key in EEF_ACTION_DIMS:
+                action_dim, command_width = EEF_ACTION_DIMS[key]
+                eef_command = convert_data_from_policy(
+                    self.policy_action[action_idx : action_idx + action_dim], key
+                )
+                command = self.motion_manager.get_command_data(key)
+                select_eef(command, self.eef_idx, command_width)[:] = eef_command
+            else:
+                action_dim = DataKey.get_dim_for_policy(key, self.env)
+                command = convert_data_from_policy(
+                    self.policy_action[action_idx : action_idx + action_dim], key
+                )
+            self.motion_manager.set_command_data(key, command, is_skip)
+            action_idx += action_dim
 
     def draw_plot(self):
         for _ax in np.ravel(self.ax):
