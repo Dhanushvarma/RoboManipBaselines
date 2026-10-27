@@ -65,14 +65,16 @@ class MotionManager:
 
             for body_manager in self.body_manager_list:
                 body_config = body_manager.body_config
-                if not (body_config.HAS_EEF and body_config.eef_idx is not None):
+                eef_idxes = DataKey.get_eef_idxes(body_config)
+                if len(eef_idxes) == 0:
                     continue
 
-                measured_eef_pose_list[body_config.eef_idx] = (
-                    body_manager.get_eef_pose_from_joint_pos(
-                        measured_joint_pos[body_config.arm_joint_idxes]
-                    )
+                # Several end-effectors of one body come back concatenated
+                eef_pose = body_manager.get_eef_pose_from_joint_pos(
+                    measured_joint_pos[body_config.arm_joint_idxes]
                 )
+                for i, eef_idx in enumerate(eef_idxes):
+                    measured_eef_pose_list[eef_idx] = eef_pose[7 * i : 7 * (i + 1)]
 
             return np.concatenate(measured_eef_pose_list)
         elif key == DataKey.MEASURED_EEF_WRENCH:
@@ -120,10 +122,12 @@ class MotionManager:
                     body_manager.body_config.gripper_joint_idxes_in_gripper_joint_pos
                 ] = single_command
             elif key == DataKey.COMMAND_EEF_POSE:
-                command[
-                    7 * body_manager.body_config.eef_idx : 7
-                    * (body_manager.body_config.eef_idx + 1)
-                ] = single_command
+                for i, eef_idx in enumerate(
+                    DataKey.get_eef_idxes(body_manager.body_config)
+                ):
+                    command[7 * eef_idx : 7 * (eef_idx + 1)] = single_command[
+                        7 * i : 7 * (i + 1)
+                    ]
             else:
                 command[:] = single_command
 

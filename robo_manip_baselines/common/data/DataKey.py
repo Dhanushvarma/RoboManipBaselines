@@ -110,13 +110,20 @@ class DataKey:
     ]
 
     @classmethod
+    def get_eef_idxes(cls, body_config):
+        """Get the indices of the body's end-effectors in the end-effector data.
+
+        ``eef_idx`` is an int, or a list for a body that owns several end-effectors (e.g. two arms on one base).
+        """
+        if not (body_config.HAS_EEF and body_config.eef_idx is not None):
+            return []
+        return np.atleast_1d(body_config.eef_idx).tolist()
+
+    @classmethod
     def get_num_eef(cls, env):
-        return len(
-            [
-                body_config
-                for body_config in env.unwrapped.body_config_list
-                if body_config.HAS_EEF and (body_config.eef_idx is not None)
-            ]
+        return sum(
+            len(cls.get_eef_idxes(body_config))
+            for body_config in env.unwrapped.body_config_list
         )
 
     @classmethod
