@@ -98,13 +98,18 @@ class MotionManager:
             DataKey.COMMAND_EEF_POSE,
             DataKey.COMMAND_MOBILE_OMNI_VEL,
             DataKey.COMMAND_WBC_MODE,
+            DataKey.COMMAND_EEF_ELLIPSOID,
         ]
         if key not in supported_data_keys:
             raise ValueError(
                 f"[{self.__class__.__name__}] Command data key is not supported: {key}"
             )
 
-        command = np.zeros(DataKey.get_dim(key, self.env))
+        if key == DataKey.COMMAND_EEF_ELLIPSOID:
+            # An end-effector that no manager gives a shape has no target
+            command = np.full(DataKey.get_dim(key, self.env), np.nan)
+        else:
+            command = np.zeros(DataKey.get_dim(key, self.env))
 
         for body_manager in self.body_manager_list:
             if key not in body_manager.SUPPORTED_DATA_KEYS:
@@ -121,12 +126,14 @@ class MotionManager:
                 command[
                     body_manager.body_config.gripper_joint_idxes_in_gripper_joint_pos
                 ] = single_command
-            elif key == DataKey.COMMAND_EEF_POSE:
+            elif key in (DataKey.COMMAND_EEF_POSE, DataKey.COMMAND_EEF_ELLIPSOID):
+                # One slot per end-effector: a pose7, or a 6D ellipsoid shape
+                width = 7 if key == DataKey.COMMAND_EEF_POSE else 6
                 for i, eef_idx in enumerate(
                     DataKey.get_eef_idxes(body_manager.body_config)
                 ):
-                    command[7 * eef_idx : 7 * (eef_idx + 1)] = single_command[
-                        7 * i : 7 * (i + 1)
+                    command[width * eef_idx : width * (eef_idx + 1)] = single_command[
+                        width * i : width * (i + 1)
                     ]
             else:
                 command[:] = single_command

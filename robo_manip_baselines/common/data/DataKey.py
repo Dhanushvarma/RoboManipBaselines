@@ -76,6 +76,11 @@ class DataKey:
     # Command mode of a whole-body controller, one-hot as above
     COMMAND_WBC_MODE = "command_wbc_mode"
 
+    # Command manipulability ellipsoid shape of each end-effector for a whole-body controller: the Mandel vector
+    # (M11, M22, M33, sqrt2 M12, sqrt2 M23, sqrt2 M13) of a unit-determinant 3x3 matrix in world axes, all NaN for
+    # no target. There is no measured key: the reached shape follows from the measured joint position.
+    COMMAND_EEF_ELLIPSOID = "command_eef_ellipsoid"
+
     # All keys of measured data
     MEASURED_DATA_KEYS = [
         MEASURED_JOINT_POS,
@@ -107,6 +112,7 @@ class DataKey:
         # COMMAND_EEF_WRENCH,
         COMMAND_MOBILE_OMNI_VEL,
         COMMAND_WBC_MODE,
+        COMMAND_EEF_ELLIPSOID,
     ]
 
     @classmethod
@@ -170,6 +176,7 @@ class DataKey:
             DataKey.COMMAND_EEF_VEL,
             DataKey.MEASURED_EEF_WRENCH,
             DataKey.COMMAND_EEF_WRENCH,
+            DataKey.COMMAND_EEF_ELLIPSOID,
         ):
             num_eef = cls.get_num_eef(env)
 
