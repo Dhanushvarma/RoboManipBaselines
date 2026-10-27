@@ -30,8 +30,9 @@ def load_ellipsoid_labels(label_dir, filename, measured_eef_pose):
     """
     Ellipsoids (num_frames, 3, 3) of one episode in the frame of its measured EEF pose, and the label attributes.
 
-    Raises if the label file does not have one entry per frame, or if its EEF rotations are not the episode's: a
-    label in another frame would otherwise train without complaint and be wrong.
+    `measured_eef_pose` (num_frames, 7) is the learned end-effector's (see UmiDpDataset's eef_idx). Raises if the
+    label file does not have one entry per frame, or if its EEF rotations are not the episode's: a label in another
+    frame would otherwise train without complaint and be wrong.
     """
     from manipulability_learning.labels import read_labels
 

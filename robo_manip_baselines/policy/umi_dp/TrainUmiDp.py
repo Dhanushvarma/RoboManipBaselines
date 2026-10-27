@@ -49,7 +49,7 @@ from .UmiDpEllipsoid import ELLIPSOID_DIM, get_label_path  # noqa: E402
 
 
 class TrainUmiDp(TrainBase):
-    """Train UMI's diffusion policy on RMB data (single arm)."""
+    """Train UMI's diffusion policy on RMB data, for one arm (see --eef_idx)."""
 
     DatasetClass = UmiDpDataset
 
@@ -95,6 +95,14 @@ class TrainUmiDp(TrainBase):
             "than only at every skip-th one. A sample still steps by skip, so the "
             "policy's timing is unchanged. Uses every frame, but an epoch and the image "
             "cache become skip times larger.",
+        )
+        parser.add_argument(
+            "--eef_idx",
+            type=int,
+            default=None,
+            help="end-effector to learn, on data with several (e.g. 1 for the right arm "
+            "in RMB_OpenArm and RMB_Oat). The policy observes and commands its pose and "
+            "gripper only; at rollout the other end-effectors hold their command.",
         )
 
         parser.add_argument(
@@ -208,6 +216,7 @@ class TrainUmiDp(TrainBase):
                 "action_horizon": self.args.action_horizon,
                 "image_size": self.args.image_size,
                 "sample_every_frame": self.args.sample_every_frame,
+                "eef_idx": self.args.eef_idx,
             }
         )
         self.model_meta_info["train"]["encoder_lr_scale"] = self.args.encoder_lr_scale
@@ -403,7 +412,8 @@ class TrainUmiDp(TrainBase):
             f"  - backbone: {self.args.model_name}, aggregation: {obs_encoder.feature_aggregation}\n"
             f"  - pose repr (state/action): {self.args.state_pose_repr} / {self.args.action_pose_repr}\n"
             f"  - lr: {self.args.lr}, vision encoders x{self.args.encoder_lr_scale}\n"
-            f"  - sample every frame: {self.args.sample_every_frame}"
+            f"  - sample every frame: {self.args.sample_every_frame}\n"
+            f"  - end-effector index: {self.args.eef_idx}"
         )
 
         self.policy.set_normalizer(self.fit_normalizer(self.train_dataloader.dataset))
