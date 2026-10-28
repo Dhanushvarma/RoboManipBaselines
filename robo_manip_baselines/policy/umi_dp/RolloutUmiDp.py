@@ -168,6 +168,9 @@ class RolloutUmiDp(RolloutBase):
     def reset_variables(self):
         super().reset_variables()
 
+        if self.ellipsoid_info is not None:
+            # The log holds the actions the action keys describe, which split_ellipsoid leaves without the ellipsoid
+            self.policy_action_list = np.empty((0, self.action_dim - ELLIPSOID_DIM))
         self.obs_buf = None
         self.policy_action_buf = None
         self.policy_ellipsoid_buf = None
