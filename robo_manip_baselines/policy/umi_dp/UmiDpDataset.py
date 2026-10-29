@@ -14,6 +14,8 @@ from .UmiDpEllipsoid import (
     ELLIPSOID_DIM,
     encode_ellipsoid,
     get_anchor_rotation,
+    get_ellipsoid_action_repr,
+    has_ellipsoid_obs,
     load_ellipsoid_labels,
 )
 
@@ -24,6 +26,17 @@ EEF_ROT_KEY = "robot0_eef_rot_axis_angle"
 GRIPPER_KEY = "robot0_gripper_width"
 
 LOW_DIM_KEYS = (EEF_POS_KEY, EEF_ROT_KEY, GRIPPER_KEY)
+
+# The arm's ellipsoid shape, an input with TrainUmiDp --ellipsoid_obs (see UmiDpEllipsoid); not a UMI key
+ELLIPSOID_KEY = "robot0_eef_ellipsoid"
+
+
+def get_low_dim_keys(model_meta_info):
+    """The policy's low-dim observation keys: UMI's, then the ellipsoid if the checkpoint takes it."""
+    ellipsoid_info = model_meta_info["action"].get("ellipsoid")
+    if ellipsoid_info is not None and has_ellipsoid_obs(ellipsoid_info):
+        return (*LOW_DIM_KEYS, ELLIPSOID_KEY)
+    return LOW_DIM_KEYS
 
 
 def get_camera_key(camera_idx):
@@ -80,7 +93,12 @@ def select_eef(data, eef_idx, width):
 
 
 def get_shape_meta(
-    obs_horizon, action_horizon, image_size, num_cameras, action_dim=ACTION_DIM
+    obs_horizon,
+    action_horizon,
+    image_size,
+    num_cameras,
+    action_dim=ACTION_DIM,
+    ellipsoid_obs=False,
 ):
     """
     Build the shape_meta that TimmObsEncoder and DiffusionUnetTimmPolicy consume.
@@ -103,6 +121,17 @@ def get_shape_meta(
             EEF_POS_KEY: {"shape": [3], "type": "low_dim", "horizon": obs_horizon},
             EEF_ROT_KEY: {"shape": [6], "type": "low_dim", "horizon": obs_horizon},
             GRIPPER_KEY: {"shape": [1], "type": "low_dim", "horizon": obs_horizon},
+            **(
+                {
+                    ELLIPSOID_KEY: {
+                        "shape": [ELLIPSOID_DIM],
+                        "type": "low_dim",
+                        "horizon": obs_horizon,
+                    }
+                }
+                if ellipsoid_obs
+                else {}
+            ),
         },
         "action": {"shape": [action_dim], "horizon": action_horizon},
     }
@@ -150,6 +179,13 @@ class UmiDpDataset(DatasetBase):
         ellipsoid_info = self.model_meta_info["action"].get("ellipsoid")
         # Per-episode ellipsoids in world axes, rotated into each sample's anchor frame in __getitem__
         self.ellipsoid_list = None if ellipsoid_info is None else []
+        self.ellipsoid_relative = (
+            ellipsoid_info is not None
+            and get_ellipsoid_action_repr(ellipsoid_info) == "relative"
+        )
+        self.ellipsoid_obs = ellipsoid_info is not None and has_ellipsoid_obs(
+            ellipsoid_info
+        )
 
         # Index every timestep that has a full observation window behind it. Action windows are clipped
         # at the episode end instead of being dropped, so late-episode behavior stays represented.
@@ -278,7 +314,11 @@ class UmiDpDataset(DatasetBase):
                 for key in get_extra_action_keys(self.model_meta_info["action"]["keys"])
             ]
             if self.ellipsoid_list is not None:
-                ellipsoid = self.ellipsoid_list[episode_idx][offset::skip][action_idxes]
+                ellipsoids = self.ellipsoid_list[episode_idx][offset::skip]
+                ellipsoid, ellipsoid_obs = (
+                    ellipsoids[action_idxes],
+                    ellipsoids[obs_idxes],
+                )
             # Decoded inside the `with`, and already resized to image_size by RmbData.
             images = {}
             if self.load_images:
@@ -298,8 +338,10 @@ class UmiDpDataset(DatasetBase):
             command_pose, anchor_pose, self.model_meta_info["action"]["pose_repr"]
         )
         if self.ellipsoid_list is not None:
+            # The anchor step is the last observation step and the first action step
+            current = ellipsoid_obs[-1] if self.ellipsoid_relative else None
             extra_actions.append(
-                encode_ellipsoid(ellipsoid, get_anchor_rotation(anchor_pose))
+                encode_ellipsoid(ellipsoid, get_anchor_rotation(anchor_pose), current)
             )
 
         # Image augmentation lives in TimmObsEncoder, matching UMI, so only the dtype/layout
@@ -316,6 +358,11 @@ class UmiDpDataset(DatasetBase):
             EEF_ROT_KEY: torch.tensor(obs_pose[:, 3:9], dtype=torch.float32),
             GRIPPER_KEY: torch.tensor(gripper, dtype=torch.float32),
         }
+        if self.ellipsoid_obs:
+            obs[ELLIPSOID_KEY] = torch.tensor(
+                encode_ellipsoid(ellipsoid_obs, get_anchor_rotation(anchor_pose)),
+                dtype=torch.float32,
+            )
         action = torch.tensor(
             np.concatenate([action_pose, command_gripper, *extra_actions], axis=1),
             dtype=torch.float32,

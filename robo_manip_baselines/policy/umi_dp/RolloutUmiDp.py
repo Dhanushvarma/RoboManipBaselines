@@ -23,6 +23,7 @@ from robo_manip_baselines.common import (  # noqa: E402
 from .UmiDpDataset import (  # noqa: E402
     EEF_POS_KEY,
     EEF_ROT_KEY,
+    ELLIPSOID_KEY,
     GRIPPER_KEY,
     get_camera_key,
     select_eef,
@@ -30,8 +31,12 @@ from .UmiDpDataset import (  # noqa: E402
 from .UmiDpEllipsoid import (  # noqa: E402
     ELLIPSOID_DIM,
     decode_ellipsoid,
+    encode_ellipsoid,
     get_anchor_rotation,
+    get_ellipsoid_action_repr,
     get_ellipsoid_command,
+    get_measured_ellipsoid,
+    has_ellipsoid_obs,
 )
 
 # Columns per end-effector of the action keys that hold every end-effector's data:
@@ -58,6 +63,22 @@ class RolloutUmiDp(RolloutBase):
             print(
                 f"[{self.__class__.__name__}] The env takes no "
                 f"{DataKey.COMMAND_EEF_ELLIPSOID}, so the predicted ellipsoid is not sent."
+            )
+        # The arm's measured shape is the policy's input, and what a relative output is decoded against
+        self.ellipsoid_relative = (
+            self.ellipsoid_info is not None
+            and get_ellipsoid_action_repr(self.ellipsoid_info) == "relative"
+        )
+        self.ellipsoid_obs = self.ellipsoid_info is not None and has_ellipsoid_obs(
+            self.ellipsoid_info
+        )
+        self.measure_ellipsoid = self.ellipsoid_relative or self.ellipsoid_obs
+        if self.measure_ellipsoid and not hasattr(
+            self.env.unwrapped, "get_eef_ellipsoid_from_obs"
+        ):
+            raise ValueError(
+                f"[{self.__class__.__name__}] The policy needs the arm's ellipsoid "
+                f"({DataKey.MEASURED_EEF_ELLIPSOID}), and the env measures none."
             )
         # End-effector the policy drives on an env with several (older checkpoints have none)
         self.eef_idx = self.model_meta_info["data"].get("eef_idx")
@@ -190,7 +211,7 @@ class RolloutUmiDp(RolloutBase):
                 np.moveaxis(image, -1, -3).astype(np.float32) / 255.0
             )
 
-        return {
+        obs = {
             **images,
             "eef_pose": get_pose9_from_pose7(
                 select_eef(
@@ -207,6 +228,18 @@ class RolloutUmiDp(RolloutBase):
                 1,
             ),
         }
+        if self.measure_ellipsoid:
+            # 3x3 shape in world axes
+            obs["ellipsoid"] = get_measured_ellipsoid(
+                select_eef(
+                    self.motion_manager.get_data(
+                        DataKey.MEASURED_EEF_ELLIPSOID, self.obs
+                    ),
+                    self.eef_idx,
+                    ELLIPSOID_DIM,
+                )
+            )
+        return obs
 
     def update_obs_buf(self):
         obs = self.get_obs()
@@ -242,6 +275,17 @@ class RolloutUmiDp(RolloutBase):
             EEF_ROT_KEY: eef_pose[:, 3:9],
             GRIPPER_KEY: np.stack([obs[GRIPPER_KEY] for obs in self.obs_buf]),
         }
+        if self.measure_ellipsoid:
+            ellipsoids = np.stack([obs["ellipsoid"] for obs in self.obs_buf])
+            if not np.isfinite(ellipsoids).all():
+                raise RuntimeError(
+                    f"[{self.__class__.__name__}] The env has not measured the arm's "
+                    f"ellipsoid ({DataKey.MEASURED_EEF_ELLIPSOID}) yet."
+                )
+        if self.ellipsoid_obs:
+            input_data[ELLIPSOID_KEY] = encode_ellipsoid(
+                ellipsoids, get_anchor_rotation(anchor_pose)
+            )
         input_data = {
             key: torch.tensor(value, dtype=torch.float32)[torch.newaxis].to(self.device)
             for key, value in input_data.items()
@@ -259,8 +303,10 @@ class RolloutUmiDp(RolloutBase):
         """
         if self.ellipsoid_info is None:
             return action
+        # The anchor step is the latest observation
+        current = self.obs_buf[-1]["ellipsoid"] if self.ellipsoid_relative else None
         self.policy_ellipsoid_chunk = decode_ellipsoid(
-            action[:, -ELLIPSOID_DIM:], get_anchor_rotation(anchor_pose)
+            action[:, -ELLIPSOID_DIM:], get_anchor_rotation(anchor_pose), current
         )
         return action[:, :-ELLIPSOID_DIM]
 

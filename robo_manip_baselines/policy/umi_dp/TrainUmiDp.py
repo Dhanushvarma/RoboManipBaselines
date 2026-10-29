@@ -37,15 +37,19 @@ from .UmiDpDataset import (  # noqa: E402
     ACTION_DIM,
     EEF_ROT_KEY,
     EXTRA_ACTION_DIMS,
-    LOW_DIM_KEYS,
     WBC_MODE_RANGE,
     UmiDpDataset,
     get_action_dim,
     get_camera_key,
     get_extra_action_keys,
+    get_low_dim_keys,
     get_shape_meta,
 )
-from .UmiDpEllipsoid import ELLIPSOID_DIM, get_label_path  # noqa: E402
+from .UmiDpEllipsoid import (  # noqa: E402
+    ELLIPSOID_ACTION_REPRS,
+    ELLIPSOID_DIM,
+    get_label_path,
+)
 
 
 class TrainUmiDp(TrainBase):
@@ -181,6 +185,21 @@ class TrainUmiDp(TrainBase):
             "manipulability-learning: one <episode name>.h5 per episode in this folder",
         )
         parser.add_argument(
+            "--ellipsoid_action_repr",
+            type=str,
+            default=ELLIPSOID_ACTION_REPRS[0],
+            choices=ELLIPSOID_ACTION_REPRS,
+            help="how the ellipsoid is predicted (see UmiDpEllipsoid): relative to the arm's "
+            "shape at the anchor step, which the rollout measures, or the shape itself",
+        )
+        parser.add_argument(
+            "--ellipsoid_obs",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="also give the policy the arm's ellipsoid shape at each observation step "
+            f"(see UmiDpEllipsoid); at rollout it is the env's {DataKey.MEASURED_EEF_ELLIPSOID}",
+        )
+        parser.add_argument(
             "--num_inference_steps",
             type=int,
             default=16,
@@ -239,6 +258,7 @@ class TrainUmiDp(TrainBase):
             self.args.image_size,
             len(self.args.camera_names),
             get_action_dim(self.args.action_keys, self.predict_ellipsoid),
+            self.predict_ellipsoid and self.args.ellipsoid_obs,
         )
 
     @property
@@ -246,7 +266,8 @@ class TrainUmiDp(TrainBase):
         return self.args.ellipsoid_label_dir is not None
 
     def get_ellipsoid_info(self):
-        """Where the ellipsoid labels came from, so a checkpoint says what it was trained on."""
+        """Where the ellipsoid labels came from and how the policy uses them, so a checkpoint says what it was
+        trained on."""
         if not self.predict_ellipsoid:
             return None
         from manipulability_learning.labels import read_labels
@@ -254,7 +275,13 @@ class TrainUmiDp(TrainBase):
         label_dir = os.path.abspath(self.args.ellipsoid_label_dir)
         _, _, attrs = read_labels(get_label_path(label_dir, self.all_filenames[0]))
         attrs.pop("source", None)  # names one episode, not the set
-        return {"label_dir": label_dir, "dim": ELLIPSOID_DIM, "label_attrs": attrs}
+        return {
+            "label_dir": label_dir,
+            "dim": ELLIPSOID_DIM,
+            "label_attrs": attrs,
+            "action_repr": self.args.ellipsoid_action_repr,
+            "obs": self.args.ellipsoid_obs,
+        }
 
     def set_data_stats(self):
         """
@@ -292,7 +319,8 @@ class TrainUmiDp(TrainBase):
         """
         normalizer = LinearNormalizer()
 
-        data_cache = {key: [] for key in (*LOW_DIM_KEYS, "action")}
+        low_dim_keys = get_low_dim_keys(self.model_meta_info)
+        data_cache = {key: [] for key in (*low_dim_keys, "action")}
         dataloader = torch.utils.data.DataLoader(
             dataset, batch_size=64, num_workers=self.args.num_workers
         )
@@ -300,7 +328,7 @@ class TrainUmiDp(TrainBase):
         dataset.load_images = False
         try:
             for batch in tqdm(dataloader, desc="Iterating dataset to fit normalizer"):
-                for key in LOW_DIM_KEYS:
+                for key in low_dim_keys:
                     data_cache[key].append(batch["obs"][key].numpy())
                 data_cache["action"].append(batch["action"].numpy())
         finally:
@@ -329,7 +357,7 @@ class TrainUmiDp(TrainBase):
             stat = array_to_stats(action[..., start : start + ELLIPSOID_DIM])
             action_normalizers.append(get_range_normalizer_from_stat(stat))
         normalizer["action"] = concatenate_normalizer(action_normalizers)
-        for key in LOW_DIM_KEYS:
+        for key in low_dim_keys:
             stat = array_to_stats(data_cache[key])
             if key == EEF_ROT_KEY:
                 normalizer[key] = get_identity_normalizer_from_stat(stat)
