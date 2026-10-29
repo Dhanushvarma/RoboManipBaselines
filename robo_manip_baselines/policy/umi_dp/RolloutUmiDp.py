@@ -230,7 +230,7 @@ class RolloutUmiDp(RolloutBase):
         }
         if self.measure_ellipsoid:
             # 3x3 shape in world axes
-            obs["ellipsoid"] = get_measured_ellipsoid(
+            ellipsoid = get_measured_ellipsoid(
                 select_eef(
                     self.motion_manager.get_data(
                         DataKey.MEASURED_EEF_ELLIPSOID, self.obs
@@ -239,6 +239,10 @@ class RolloutUmiDp(RolloutBase):
                     ELLIPSOID_DIM,
                 )
             )
+            if not np.isfinite(ellipsoid).all() and self.obs_buf is not None:
+                # Undefined for a degenerate ellipsoid (a straight elbow): the last shape holds
+                ellipsoid = self.obs_buf[-1]["ellipsoid"]
+            obs["ellipsoid"] = ellipsoid
         return obs
 
     def update_obs_buf(self):
@@ -280,7 +284,9 @@ class RolloutUmiDp(RolloutBase):
             if not np.isfinite(ellipsoids).all():
                 raise RuntimeError(
                     f"[{self.__class__.__name__}] The env has not measured the arm's "
-                    f"ellipsoid ({DataKey.MEASURED_EEF_ELLIPSOID}) yet."
+                    f"ellipsoid ({DataKey.MEASURED_EEF_ELLIPSOID}): it gives none for a "
+                    "degenerate one, such as at a straight elbow, and there is no earlier "
+                    "shape to hold."
                 )
         if self.ellipsoid_obs:
             input_data[ELLIPSOID_KEY] = encode_ellipsoid(

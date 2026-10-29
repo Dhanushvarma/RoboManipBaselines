@@ -81,8 +81,9 @@ class DataKey:
     # no target
     COMMAND_EEF_ELLIPSOID = "command_eef_ellipsoid"
 
-    # Measured manipulability ellipsoid shape of each end-effector, as the whole-body controller computes it for its
-    # task: same layout as COMMAND_EEF_ELLIPSOID, all NaN while unknown
+    # Measured manipulability ellipsoid shape of each end-effector, from the measured joint position with the
+    # whole-body controller's definition: same layout as COMMAND_EEF_ELLIPSOID, all NaN where it is undefined (a
+    # degenerate ellipsoid)
     MEASURED_EEF_ELLIPSOID = "measured_eef_ellipsoid"
 
     # All keys of measured data
