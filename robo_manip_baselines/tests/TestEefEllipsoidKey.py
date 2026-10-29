@@ -114,8 +114,19 @@ def test_eef_without_ellipsoid_has_no_target():
     assert np.array_equal(command[6:12], shapes[6:12]), command
 
 
+def test_measured_ellipsoid_comes_from_the_env():
+    env = make_env([FakeEllipsoidConfig(eef_idx=0), FakeEllipsoidConfig(eef_idx=1)])
+    shapes = get_shapes(2)
+    env.get_eef_ellipsoid_from_obs = lambda obs: shapes.copy()
+    assert DataKey.get_dim(DataKey.MEASURED_EEF_ELLIPSOID, env) == 12
+
+    measured = MotionManager(env).get_data(DataKey.MEASURED_EEF_ELLIPSOID, obs={})
+    assert np.array_equal(measured, shapes), measured
+
+
 if __name__ == "__main__":
     test_one_eef_per_body()
     test_two_eef_body()
     test_two_eef_body_in_reverse_order()
     test_eef_without_ellipsoid_has_no_target()
+    test_measured_ellipsoid_comes_from_the_env()

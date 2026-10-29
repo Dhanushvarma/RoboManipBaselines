@@ -85,6 +85,8 @@ class MotionManager:
             return self.env.unwrapped.get_mobile_vel_from_obs(obs)
         elif key == DataKey.MEASURED_WBC_MODE:
             return self.env.unwrapped.get_wbc_mode_from_obs(obs)
+        elif key == DataKey.MEASURED_EEF_ELLIPSOID:
+            return self.env.unwrapped.get_eef_ellipsoid_from_obs(obs)
         else:
             raise ValueError(
                 f"[{self.__class__.__name__}] Invalid measured data key: {key}"

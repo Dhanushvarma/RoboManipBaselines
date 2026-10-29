@@ -78,8 +78,12 @@ class DataKey:
 
     # Command manipulability ellipsoid shape of each end-effector for a whole-body controller: the Mandel vector
     # (M11, M22, M33, sqrt2 M12, sqrt2 M23, sqrt2 M13) of a unit-determinant 3x3 matrix in world axes, all NaN for
-    # no target. There is no measured key: the reached shape follows from the measured joint position.
+    # no target
     COMMAND_EEF_ELLIPSOID = "command_eef_ellipsoid"
+
+    # Measured manipulability ellipsoid shape of each end-effector, as the whole-body controller computes it for its
+    # task: same layout as COMMAND_EEF_ELLIPSOID, all NaN while unknown
+    MEASURED_EEF_ELLIPSOID = "measured_eef_ellipsoid"
 
     # All keys of measured data
     MEASURED_DATA_KEYS = [
@@ -96,6 +100,7 @@ class DataKey:
         MEASURED_MOBILE_OMNI_POS,
         MEASURED_MOBILE_OMNI_VEL,
         MEASURED_WBC_MODE,
+        MEASURED_EEF_ELLIPSOID,
     ]
 
     # All keys of command data
@@ -176,6 +181,7 @@ class DataKey:
             DataKey.COMMAND_EEF_VEL,
             DataKey.MEASURED_EEF_WRENCH,
             DataKey.COMMAND_EEF_WRENCH,
+            DataKey.MEASURED_EEF_ELLIPSOID,
             DataKey.COMMAND_EEF_ELLIPSOID,
         ):
             num_eef = cls.get_num_eef(env)
